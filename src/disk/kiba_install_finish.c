@@ -114,7 +114,7 @@ static int write_file(const char *path, const char *content) {
 
 int kiba_install_write_configs(const char *target_root,
                                 const char *root_uuid, const char *esp_uuid,
-                                const char *hostname, const char *locale,
+                                const char *hostname,
                                 const char *keymap) {
     char path[1024];
     char content[2048];
