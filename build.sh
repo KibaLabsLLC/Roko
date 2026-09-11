@@ -10,7 +10,7 @@ pacman -S --noconfirm --needed gtk4 libadwaita libgee vala meson ninja base-deve
 cd "$(dirname "$0")/src"
 meson setup build --prefix=/usr
 ninja -C build
-# ninja -C build install   # uncomment to install onto this machine
+ninja -C build install   # uncomment to install onto this machine
 cd -
 
 # ── Privileged backend: libkibadisk + kibaos-oobe-backend
