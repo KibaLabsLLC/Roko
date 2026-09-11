@@ -57,9 +57,6 @@ int kiba_install_write_configs(const char *target_root,
                                 const char *hostname, const char *locale,
                                 const char *keymap);
 
-/* Runs locale-gen inside the chroot (posix_spawnp arch-chroot). */
-int kiba_install_locale_gen(const char *target_root);
-
 /* Removes the live user, creates the real user account, sets password.
  * useradd/userdel/chpasswd are run inside the chroot via posix_spawnp
  * (no shell); chpasswd's input is written to its stdin pipe directly,
