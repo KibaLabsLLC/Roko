@@ -343,6 +343,65 @@ window.dark .oobe-progress trough { background: rgba(255,255,255,0.10); }
 window.dark .oobe-feature-title { color: #f1f5f9; }
 window.dark .oobe-feature-body  { color: #94a3b8; }
 
+/* ── Dock/taskbar animation (installing page) ───────────────────────
+ * Same glass-taskbar-with-a-wandering-cursor bit as the web loading intro,
+ * re-driven from Vala over a Gtk.Fixed. The pop/adjacent states are
+ * toggled in code each frame; this just supplies the "spring" overshoot
+ * so the icons settle with a little bounce instead of snapping. */
+.oobe-dock-taskbar {
+    background:    rgba(248,250,252,0.9);
+    border:        1px solid rgba(0,0,0,0.07);
+    border-radius: 22px;
+    box-shadow:    0 20px 60px rgba(15,23,42,0.06), 0 3px 12px rgba(15,23,42,0.03);
+    animation: scale-in 500ms cubic-bezier(0.34, 1.56, 0.64, 1) 80ms both;
+}
+window.dark .oobe-dock-taskbar {
+    background:   rgba(30,41,59,0.55);
+    border-color: rgba(255,255,255,0.08);
+}
+
+.oobe-dock-icon {
+    background:    #ffffff;
+    border:        1px solid rgba(0,0,0,0.07);
+    border-radius: 14px;
+    box-shadow:    0 4px 10px rgba(15,23,42,0.04);
+    transition: 220ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+window.dark .oobe-dock-icon {
+    background:   rgba(51,65,85,0.6);
+    border-color: rgba(255,255,255,0.12);
+}
+
+.oobe-dock-icon-popped {
+    transform:    scale(1.18);
+    box-shadow:   0 16px 30px rgba(15,23,42,0.14);
+    border-color: rgba(0,113,227,0.35);
+}
+.oobe-dock-icon-adjacent {
+    transform:  scale(1.06);
+    box-shadow: 0 8px 16px rgba(15,23,42,0.08);
+}
+window.dark .oobe-dock-icon-popped { border-color: rgba(64,156,255,0.45); }
+
+.oobe-dock-dot {
+    min-width:     4px;
+    min-height:    4px;
+    border-radius: 999px;
+    background:    transparent;
+}
+.oobe-dock-dot-active { background: #0071e3; }
+window.dark .oobe-dock-dot-active { background: #409cff; }
+
+.oobe-dock-cursor {
+    color:      #0f172a;
+    opacity:    0.85;
+    transition: 150ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.oobe-dock-cursor-click { color: #0071e3; opacity: 1; }
+window.dark .oobe-dock-cursor       { color: #f1f5f9; }
+window.dark .oobe-dock-cursor-click { color: #409cff; }
+
+
 /* ── Form entries ──────────────────────────────────────────────────────── */
 entry, row.entry, .oobe-prefs-group entry {
     background:  rgba(248,250,252,0.9);
@@ -373,4 +432,3 @@ row.combo, row.action {
     border-radius: 12px;
     background:    rgba(248,250,252,0.9);
 }
-
