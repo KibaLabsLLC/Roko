@@ -1,5 +1,4 @@
-# ✦  Rōkō (狼吼) — “wolf's howl” ✦ 
-# KibaOS OOBE Setup
+# ✦  Rōkō (狼吼) — “wolf's howl” |  KibaOS OOBE Setup ✦ 
 
 ### The fullscreen, one-step-per-screen out-of-box-experience installer for KibaOS.
 
