@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+set -e
+mkdir -p /etc/kibaos
+touch /etc/kibaos/oem-pending
+
+id oem &>/dev/null || useradd -m -G wheel,audio,video,input,network,storage,power,docker -s /bin/bash oem
+passwd -d oem 2>/dev/null || true
+
+mkdir -p /etc/gdm
+# Stash whatever custom.conf looked like before OEM mode (there may be
+# none, if this device never had one) so kibaos-oem-finish can put it
+# back once the temporary "oem" account is gone -- GDM's custom.conf is
+# one flat file, not a conf.d directory to layer a drop-in on top of.
+[ -f /etc/gdm/custom.conf ] && cp -f /etc/gdm/custom.conf /etc/gdm/custom.conf.pre-oem 2>/dev/null || true
+cat > /etc/gdm/custom.conf << 'GDMOEMCONF'
+[daemon]
+AutomaticLoginEnable=true
+AutomaticLogin=oem
+WaylandEnable=true
+GDMOEMCONF
+
+mkdir -p /var/lib/AccountsService/users
+cat > /var/lib/AccountsService/users/oem << 'OEMACCOUNTS'
+[User]
+Session=budgie-desktop-kwinwayland
+XSession=budgie-desktop-kwinwayland
+SystemAccount=false
+OEMACCOUNTS
+
+# OOBE app autostarts for the oem user too, in OEM-finish mode (the
+# /etc/kibaos/oem-pending marker is what triggers that mode, not the
+# username — the OOBE app itself doesn't know or care who's logged in).
+echo "OEM mode prepared. This device will boot to a temporary 'oem' account"
+echo "and prompt the customer to finish setup on next boot. Do not run this"
+echo "on a normal end-user installation."

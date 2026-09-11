@@ -1,0 +1,376 @@
+/* ═══════════════════════════════════════════════════════════════════════
+ * KibaOS OOBE — white-card design language, image 2 inspiration.
+ * Timing functions:
+ *   settle  cubic-bezier(0.22, 1, 0.36, 1)   easeOutQuint, enter
+ *   fade    cubic-bezier(0.5,  0, 0.75, 0)   easeInQuart,  leave
+ *   spring  cubic-bezier(0.34, 1.56, 0.64, 1) gentle overshoot
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── Window / background ───────────────────────────────────────────────── */
+window.kibaos-oobe-window { background: transparent; }
+
+.oobe-background {
+    background: #ffffff;
+    transition: background 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+window.dark .oobe-background {
+    background: #12161d;
+}
+
+/* ── Brand wordmark ────────────────────────────────────────────────────── */
+.oobe-brand {
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    color: rgba(15,23,42,0.80);
+}
+
+/* ── Corner controls (language / dark-mode toggle) ───────────────────────── */
+.oobe-corner-button {
+    background:    rgba(15,23,42,0.05);
+    color:         #334155;
+    border:        1px solid rgba(15,23,42,0.10);
+    border-radius: 999px;
+    min-width:     34px;
+    min-height:    34px;
+    padding:       6px 12px;
+    font-size:     12px;
+    font-weight:   650;
+    transition:
+        background-color 140ms cubic-bezier(0.22, 1, 0.36, 1),
+        transform         140ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.oobe-corner-button:hover  { background: rgba(15,23,42,0.09); transform: translateY(-1px); }
+.oobe-corner-button:active { transform: translateY(0); transition-duration: 70ms; }
+window.dark .oobe-corner-button {
+    background: rgba(30,41,59,0.65);
+    color:      #e2e8f0;
+    border-color: rgba(255,255,255,0.12);
+}
+window.dark .oobe-corner-button:hover { background: rgba(51,65,85,0.85); }
+
+/* ── Card ──────────────────────────────────────────────────────────────── */
+/* Windows' OOBE puts content straight on the full-bleed background with no
+ * visible container at all -- no border, no shadow, no card edge to notice.
+ * That's deliberate: one less visual boundary for the eye to register while
+ * reading a screen you'll only ever see once. Acrylic/card-style framing
+ * stays reserved for genuinely transient surfaces (the Wi-Fi password
+ * dialog, which already uses Adw.MessageDialog rather than this class). */
+.oobe-card {
+    background:    transparent;
+    border:        none;
+    box-shadow:    none;
+    animation: card-in 460ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+window.dark .oobe-card {
+    background:    transparent;
+    border:        none;
+    box-shadow:    none;
+}
+
+@keyframes card-in {
+    from { opacity: 0; transform: translateY(14px); }
+    to   { opacity: 1; transform: translateY(0);    }
+}
+
+/* Inner padding -- extra room now that there's no card edge doing any of
+ * the visual separation work; whitespace is the boundary instead. */
+.oobe-inner {
+    padding: 8px 12px 12px;
+}
+
+/* ── Step dots ─────────────────────────────────────────────────────────── */
+.oobe-step-dot {
+    min-width:     7px;
+    min-height:    7px;
+    border-radius: 999px;
+    background:    rgba(0,0,0,0.15);
+    transition: all 300ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.oobe-step-dot-active {
+    min-width:  22px;
+    background: #0071e3;
+}
+window.dark .oobe-step-dot { background: rgba(255,255,255,0.18); }
+window.dark .oobe-step-dot-active { background: #409cff; }
+
+/* ── Nav row ───────────────────────────────────────────────────────────── */
+.oobe-nav-row { margin-top: 4px; }
+
+/* ── Typography ────────────────────────────────────────────────────────── */
+/* Welcome-page greeting -- same system font as everything else, just set
+ * large. No script/cursive face: HIG reserves custom typefaces for
+ * branding or "an immersive gaming experience," and a plain OS installer
+ * is neither -- one consistent typeface reads calmer and more native. */
+.oobe-welcome-greeting {
+    font-size:      44px;
+    font-weight:    650;
+    color:          #1d1d1f;
+    letter-spacing: -0.4px;
+    margin-top:     4px;
+    animation: fade-up 460ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+window.dark .oobe-welcome-greeting { color: #f1f5f9; }
+
+.oobe-title {
+    font-size:      30px;
+    font-weight:    650;
+    color:          #0f172a;
+    letter-spacing: -0.4px;
+    line-height:    1.25;
+    margin-bottom:  4px;
+    animation: fade-up 380ms cubic-bezier(0.22, 1, 0.36, 1) 60ms both;
+}
+.oobe-subtitle {
+    font-size:   16px;
+    color:       #64748b;
+    line-height: 1.6;
+    animation:   fade-up 380ms cubic-bezier(0.22, 1, 0.36, 1) 100ms both;
+}
+@keyframes fade-up {
+    from { opacity: 0; transform: translateY(7px); }
+    to   { opacity: 1; transform: translateY(0);   }
+}
+window.dark .oobe-title    { color: #f1f5f9; }
+window.dark .oobe-subtitle { color: #94a3b8; }
+window.dark .oobe-brand    { color: rgba(255,255,255,0.75); }
+
+/* Status text that means "this went wrong" — distinct from the neutral
+ * .oobe-subtitle so an error doesn't read as just another status update.
+ * Deliberately no shake/motion here: a startling animation adds stress
+ * right when someone's already hit a snag, a steady color change says
+ * the same thing calmly. */
+.oobe-error {
+    font-size:   16px;
+    color:       #dc2626;
+    line-height: 1.6;
+    animation:   fade-up 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+window.dark .oobe-error { color: #f87171; }
+
+/* ── Step counter (text alongside the dots) ──────────────────────────────
+ * "Step 3 of 6" removes any guesswork about how much is left -- knowing
+ * where you are and how far there is to go is one of the cheapest ways to
+ * lower anxiety in a multi-step flow you can't preview ahead of time. */
+.oobe-step-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(0,0,0,0.38);
+    letter-spacing: 0.2px;
+}
+window.dark .oobe-step-label { color: rgba(255,255,255,0.40); }
+
+/* ── Wi-Fi canvas ──────────────────────────────────────────────────────── */
+.oobe-wifi-canvas {
+    animation: scale-in 500ms cubic-bezier(0.34, 1.56, 0.64, 1) 80ms both;
+}
+@keyframes scale-in {
+    from { opacity: 0; transform: scale(0.6); }
+    to   { opacity: 1; transform: scale(1);   }
+}
+
+/* ── List / pickers ────────────────────────────────────────────────────── */
+.oobe-list { background: transparent; }
+
+.oobe-signal-glyph {
+    font-family: monospace;
+    font-size: 15px;
+    font-weight: 700;
+    color: #0071e3;
+    min-width: 34px;
+}
+window.dark .oobe-signal-glyph { color: #409cff; }
+
+.oobe-list row,
+listview > row {
+    background:    rgba(248,250,252,0.9);
+    border:        1px solid rgba(0,0,0,0.07);
+    border-radius: 18px;
+    margin:        4px 0;
+    padding:       14px 16px;
+    color:         #1e293b;
+    transition:
+        background-color 180ms cubic-bezier(0.22, 1, 0.36, 1),
+        border-color     180ms cubic-bezier(0.22, 1, 0.36, 1),
+        box-shadow       180ms cubic-bezier(0.22, 1, 0.36, 1),
+        transform        180ms cubic-bezier(0.22, 1, 0.36, 1);
+    animation: fade-up 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.oobe-list row:hover { background: #f0f9ff; border-color: rgba(0,113,227,0.28); transform: translateX(2px); }
+.oobe-list row:selected {
+    background: rgba(0,113,227,0.10);
+    border-color: rgba(0,113,227,0.55);
+    box-shadow: 0 0 0 3px rgba(0,113,227,0.14);
+}
+window.dark .oobe-list row,
+window.dark listview > row {
+    background: rgba(30,41,59,0.55);
+    border-color: rgba(255,255,255,0.08);
+    color: #e2e8f0;
+}
+window.dark .oobe-list row:hover { background: rgba(0,113,227,0.16); border-color: rgba(0,113,227,0.4); }
+window.dark .oobe-list row:selected {
+    background: rgba(0,113,227,0.22);
+    border-color: rgba(0,113,227,0.6);
+}
+
+/* ── Preferences group (account page) ─────────────────────────────────── */
+.oobe-prefs-group {
+    border-radius: 20px;
+    overflow: hidden;
+}
+
+/* ── Summary box (confirm page) ────────────────────────────────────────── */
+.oobe-summary-box {
+    background:    rgba(248,250,252,0.9);
+    border:        1px solid rgba(0,0,0,0.07);
+    border-radius: 20px;
+    overflow:      hidden;
+    margin-top:    8px;
+}
+.oobe-summary-row {
+    padding: 13px 18px;
+}
+.oobe-summary-sep {
+    margin: 0 18px;
+    opacity: 0.5;
+}
+.oobe-summary-key {
+    font-size:   13px;
+    font-weight: 600;
+    color:       #475569;
+}
+.oobe-summary-val {
+    font-size: 13px;
+    color:     #0f172a;
+}
+window.dark .oobe-summary-box { background: rgba(30,41,59,0.55); border-color: rgba(255,255,255,0.08); }
+window.dark .oobe-summary-key { color: #94a3b8; }
+window.dark .oobe-summary-val { color: #f1f5f9; }
+window.dark .oobe-prefs-group,
+window.dark row.combo, window.dark row.action {
+    background: rgba(30,41,59,0.55);
+}
+
+/* ── Done check icon ───────────────────────────────────────────────────── */
+.oobe-done-check {
+    color: #0071e3;
+    font-size: 48px;
+    font-weight: 800;
+    animation: pop-in 500ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+@keyframes pop-in {
+    from { opacity: 0; transform: scale(0.4); }
+    to   { opacity: 1; transform: scale(1);   }
+}
+
+/* ── Buttons ───────────────────────────────────────────────────────────── */
+.oobe-primary-button {
+    background:    #0071e3;
+    color:         #ffffff;
+    border:        none;
+    border-radius: 999px;
+    padding:       15px 34px;
+    font-weight:   650;
+    font-size:     16px;
+    min-width:     120px;
+    box-shadow:    0 1px 2px rgba(15,23,42,0.12);
+    transition:
+        background-color 140ms cubic-bezier(0.22, 1, 0.36, 1),
+        box-shadow       140ms cubic-bezier(0.22, 1, 0.36, 1),
+        transform        120ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.oobe-primary-button:hover {
+    background: #0077ed;
+    box-shadow: 0 2px 6px rgba(15,23,42,0.16);
+    transform:  translateY(-1px);
+}
+.oobe-primary-button:active {
+    background:        #0068d6;
+    transform:         translateY(0);
+    box-shadow:        0 1px 3px rgba(0,113,227,0.20);
+    transition-duration: 70ms;
+}
+
+.oobe-secondary-button {
+    background:    transparent;
+    color:         #475569;
+    border:        1px solid rgba(0,0,0,0.14);
+    border-radius: 999px;
+    padding:       15px 28px;
+    font-size:     16px;
+    min-width:     100px;
+    transition:
+        background-color 140ms cubic-bezier(0.22, 1, 0.36, 1),
+        border-color     140ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.oobe-secondary-button:hover  { background: #f1f5f9; border-color: rgba(0,0,0,0.22); }
+.oobe-secondary-button:active { background: #e2e8f0; transition-duration: 70ms; }
+window.dark .oobe-secondary-button { color: #cbd5e1; border-color: rgba(255,255,255,0.16); }
+window.dark .oobe-secondary-button:hover  { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.26); }
+window.dark .oobe-secondary-button:active { background: rgba(255,255,255,0.14); }
+
+/* ── Progress bar ──────────────────────────────────────────────────────── */
+.oobe-progress { min-height: 6px; border-radius: 999px; }
+.oobe-progress trough {
+    background:    #e2e8f0;
+    border-radius: 999px;
+    min-height:    6px;
+}
+.oobe-progress progress {
+    background:  linear-gradient(90deg, #0071e3, #409cff);
+    border-radius: 999px;
+    transition:  all 450ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+window.dark .oobe-progress trough { background: rgba(255,255,255,0.10); }
+
+/* ── Feature slideshow (installing page) ─────────────────────────────────
+ * Something to read while the real progress line is stuck on one status
+ * for a while -- unsquashfs extraction in particular takes far longer
+ * than anything else in the install and gives no finer-grained updates. */
+.oobe-feature-stack { min-height: 90px; }
+.oobe-feature-title {
+    font-size:   17px;
+    font-weight: 650;
+    color:       #0f172a;
+}
+.oobe-feature-body {
+    font-size:   14px;
+    color:       #64748b;
+    line-height: 1.5;
+    margin-top:  2px;
+}
+window.dark .oobe-feature-title { color: #f1f5f9; }
+window.dark .oobe-feature-body  { color: #94a3b8; }
+
+/* ── Form entries ──────────────────────────────────────────────────────── */
+entry, row.entry, .oobe-prefs-group entry {
+    background:  rgba(248,250,252,0.9);
+    border:      1px solid rgba(0,0,0,0.10);
+    border-radius: 10px;
+    color:       #0f172a;
+    transition:
+        border-color     160ms cubic-bezier(0.22, 1, 0.36, 1),
+        background-color 160ms cubic-bezier(0.22, 1, 0.36, 1),
+        box-shadow       160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+entry:focus-within, row.entry:focus-within {
+    border-color: #0071e3;
+    background:   #ffffff;
+    box-shadow:   0 0 0 3px rgba(0,113,227,0.18);
+}
+window.dark entry, window.dark row.entry, window.dark .oobe-prefs-group entry {
+    background: rgba(30,41,59,0.7);
+    border-color: rgba(255,255,255,0.12);
+    color: #f1f5f9;
+}
+window.dark entry:focus-within, window.dark row.entry:focus-within {
+    background: rgba(30,41,59,0.95);
+}
+
+/* ── ComboRow / ActionRow (Adwaita overrides) ──────────────────────────── */
+row.combo, row.action {
+    border-radius: 12px;
+    background:    rgba(248,250,252,0.9);
+}
+
