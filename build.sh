@@ -16,7 +16,7 @@ cd -
 # ── Privileged backend: libkibadisk + kibaos-oobe-backend
 cd "$(dirname "$0")/src/disk"
 make
-# make install   # uncomment to install onto this machine
+make install   # uncomment to install onto this machine
 cd -
 
 echo "Build complete: src/build/io.kibaos.oobe, src/build/io.kibaos.winapps-setup, src/disk/kibaos-oobe-backend"
