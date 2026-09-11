@@ -1,9 +1,7 @@
-# KibaOS OOBE Installer
+# Rōkō (狼吼) — “wolf's howl”
 
 The fullscreen, one-step-per-screen out-of-box-experience installer for
-KibaOS. Extracted from the main KibaOS ISO build script (`build.sh` in
-the [kibaos-desktop] repo), where it previously lived inline as a block
-of heredocs writing files into the live ISO's chroot at build time.
+KibaOS.
 
 ## Layout
 
@@ -66,13 +64,3 @@ toolchain (`base-devel` on Arch). Produces:
 - `src/build/io.kibaos.winapps-setup` — the Windows Workspace setup UI
 - `src/disk/kibaos-oobe-backend` — the privileged backend, statically
   linked against `libkibadisk.a`
-
-## Origin note
-
-This previously replaced an earlier attempt at porting
-elementary/`distinst` to Arch/pacman, which needed source patches to
-distinst's apt/dpkg assumptions plus a from-source GNU parted build for
-`bindgen` — a dependency chain not built for Arch in the first place.
-This is a from-scratch Vala/GTK4/libadwaita app instead.
-
-[kibaos-desktop]: ../kibaos-desktop
