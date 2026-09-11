@@ -38,7 +38,7 @@ public class KibaOOBE : Adw.Application {
     }
 
     // ── Dark mode ─────────────────────────────────────────────────────
-    private bool is_dark = true;
+    private bool is_dark = false;
 
     private void apply_dark_mode () {
         if (is_dark) window.add_css_class ("dark");
@@ -119,10 +119,10 @@ public class KibaOOBE : Adw.Application {
         window.notify["fullscreened"].connect (() => {
             if (!window.fullscreened) window.fullscreen ();
         });
-        // Default to dark mode; the toggle on every page still lets the
-        // user switch to light from there.
-        Adw.StyleManager.get_default ().color_scheme = Adw.ColorScheme.FORCE_DARK;
-        is_dark = true;
+        // Default to light mode; the toggle on every page still lets the
+        // user switch to dark from there.
+        Adw.StyleManager.get_default ().color_scheme = Adw.ColorScheme.FORCE_LIGHT;
+        is_dark = false;
         apply_dark_mode ();
         nav_view = new Adw.NavigationView ();
         window.set_content (nav_view);
@@ -1138,13 +1138,248 @@ public class KibaOOBE : Adw.Application {
     private Gtk.Stack      feature_stack;
     private uint            feature_timer_id = 0;
 
+    // ── Install-page dock animation ─────────────────────────────────────
+    // Ported from the KibaOS Desktop web loading animation: a glass
+    // taskbar with app icons and a small virtual cursor that glides
+    // across it, "clicking" a couple of icons along the way. The web
+    // version was a fixed 15s intro; here the install duration is
+    // unknown ahead of time, so the same 15s choreography just loops
+    // for as long as the backend takes.
+    private const int64  DOCK_DURATION_MS = 15000;
+    private const double DOCK_SPACING     = 66.0;
+    private const double DOCK_START_X     = 10.0;
+    private const double DOCK_ICON_Y      = 10.0;
+    private const double DOCK_ICON_HALF   = 26.0;
+
+    private Gtk.Fixed     dock_taskbar;
+    private Gtk.Widget[]  dock_icon_frames;
+    private double[]      dock_icon_lift;
+    private Gtk.Widget    dock_cursor;
+    private int64         dock_anim_start_us = 0;
+    private int64         dock_loop_index    = -1;
+    private bool          dock_click1_done   = false;
+    private bool          dock_click2_done   = false;
+    private uint          dock_tick_id       = 0;
+
+    private Gtk.Widget make_dock_icon (string icon_name, string tooltip, bool dot_active) {
+        var frame = new Gtk.Box (Gtk.Orientation.VERTICAL, 5) {
+            halign = Gtk.Align.CENTER,
+            valign = Gtk.Align.START,
+            width_request = 52
+        };
+        var icon_box = new Gtk.Box (Gtk.Orientation.VERTICAL, 0) {
+            width_request = 52, height_request = 52,
+            halign = Gtk.Align.CENTER, valign = Gtk.Align.CENTER
+        };
+        icon_box.add_css_class ("oobe-dock-icon");
+        var img = new Gtk.Image.from_icon_name (icon_name) { pixel_size = 20 };
+        icon_box.append (img);
+        frame.append (icon_box);
+
+        var dot = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 0) {
+            halign = Gtk.Align.CENTER, width_request = 4, height_request = 4
+        };
+        dot.add_css_class ("oobe-dock-dot");
+        if (dot_active) dot.add_css_class ("oobe-dock-dot-active");
+        frame.append (dot);
+
+        frame.tooltip_text = tooltip;
+        // Stash the inner icon box so the tick callback can toggle its
+        // "popped"/"adjacent" CSS class without walking the widget tree.
+        frame.set_data<Gtk.Widget> ("icon-box", icon_box);
+        return frame;
+    }
+
+    private Gtk.Widget build_install_dock () {
+        string[,] apps = {
+            // icon name,                          tooltip,                                                              starts with an "active" dot
+            { "view-grid-symbolic",              t ("App Launcher", "Uygulama Başlatıcı", "Uruchamianie aplikacji"),   "1" },
+            { "folder-symbolic",                  t ("File Manager", "Dosya Yöneticisi", "Menedżer plików"),           "0" },
+            { "web-browser-symbolic",             t ("Web Browser", "Web Tarayıcı", "Przeglądarka"),                    "1" },
+            { "utilities-terminal-symbolic",      t ("Terminal", "Uçbirim", "Terminal"),                                "0" },
+            { "computer-symbolic",                t ("Windows (LSW)", "Windows (LSW)", "Windows (LSW)"),                "0" },
+            { "system-software-install-symbolic", t ("kibapkg Store", "kibapkg Mağazası", "Sklep kibapkg"),            "0" },
+            { "preferences-system-symbolic",      t ("Control Center", "Denetim Merkezi", "Centrum sterowania"),       "0" }
+        };
+        int n = apps.length[0];
+
+        dock_taskbar = new Gtk.Fixed ();
+        dock_taskbar.add_css_class ("oobe-dock-taskbar");
+        dock_taskbar.width_request  = (int) (DOCK_START_X * 2 + DOCK_SPACING * (n - 1) + DOCK_ICON_HALF * 2);
+        dock_taskbar.height_request = 132;
+
+        dock_icon_frames = new Gtk.Widget[n];
+        dock_icon_lift   = new double[n];
+        for (int i = 0; i < n; i++) {
+            var frame = make_dock_icon (apps[i, 0], apps[i, 1], apps[i, 2] == "1");
+            dock_icon_frames[i] = frame;
+            dock_taskbar.put (frame, DOCK_START_X + i * DOCK_SPACING, DOCK_ICON_Y);
+        }
+
+        dock_cursor = new Gtk.Image.from_icon_name ("pan-end-symbolic") { pixel_size = 16 };
+        dock_cursor.add_css_class ("oobe-dock-cursor");
+        dock_taskbar.put (dock_cursor, DOCK_START_X, DOCK_ICON_Y + 90);
+
+        var wrap = new Gtk.Box (Gtk.Orientation.VERTICAL, 0) {
+            halign = Gtk.Align.CENTER, margin_top = 4, margin_bottom = 4
+        };
+        wrap.append (dock_taskbar);
+
+        dock_anim_start_us = 0;
+        dock_loop_index    = -1;
+        dock_click1_done   = false;
+        dock_click2_done   = false;
+        dock_tick_id = dock_taskbar.add_tick_callback (on_dock_tick);
+
+        return wrap;
+    }
+
+    // Brief highlight on the cursor to stand in for the web version's
+    // expanding click-ripple, without needing a second drawing surface.
+    private void pulse_dock_cursor () {
+        if (dock_cursor == null) return;
+        dock_cursor.add_css_class ("oobe-dock-cursor-click");
+        GLib.Timeout.add (260, () => {
+            if (dock_cursor != null) dock_cursor.remove_css_class ("oobe-dock-cursor-click");
+            return GLib.Source.REMOVE;
+        });
+    }
+
+    // Same six-stage timeline as the original JS (swoop in -> glide across
+    // all icons -> hover+click the last one -> glide back -> hover+click
+    // App 5 (Windows/LSW) -> settle), just re-driven off GTK's frame clock
+    // instead of performance.now(), and wrapped to repeat every 15s.
+    private bool on_dock_tick (Gtk.Widget widget, Gdk.FrameClock frame_clock) {
+        var taskbar = widget as Gtk.Fixed;
+        if (taskbar == null || dock_icon_frames == null || dock_cursor == null) {
+            return GLib.Source.REMOVE;
+        }
+
+        int64 now_us = frame_clock.get_frame_time ();
+        if (dock_anim_start_us == 0) dock_anim_start_us = now_us;
+        int64 elapsed_ms = (now_us - dock_anim_start_us) / 1000;
+
+        int64 loop_idx = elapsed_ms / DOCK_DURATION_MS;
+        if (loop_idx != dock_loop_index) {
+            dock_loop_index  = loop_idx;
+            dock_click1_done = false;
+            dock_click2_done = false;
+        }
+        double t_ms = (double) (elapsed_ms % DOCK_DURATION_MS);
+
+        int n = dock_icon_frames.length;
+        double[] centers_x = new double[n];
+        for (int i = 0; i < n; i++) centers_x[i] = DOCK_START_X + i * DOCK_SPACING + DOCK_ICON_HALF;
+        double base_y = DOCK_ICON_Y + DOCK_ICON_HALF;
+
+        double start_cx = centers_x[0] - 45;
+        double start_cy = base_y + 60;
+        int last_idx = n - 1;
+        int lsw_idx  = int.min (4, last_idx);
+
+        double cur_x, cur_y;
+        if (t_ms < 800) {
+            double e = t_ms / 800.0;
+            double ease = 1 - Math.pow (1 - e, 3);
+            cur_x = start_cx + (centers_x[0] - start_cx) * ease;
+            cur_y = start_cy + (base_y - start_cy) * ease;
+        } else if (t_ms < 7600) {
+            double glide_t = (t_ms - 800) / 6800.0;
+            double target_index = glide_t * last_idx;
+            int i0 = (int) Math.floor (target_index);
+            int i1 = int.min (i0 + 1, last_idx);
+            double local_t = target_index - i0;
+            double smooth_t = local_t * local_t * (3 - 2 * local_t);
+            cur_x = centers_x[i0] + (centers_x[i1] - centers_x[i0]) * smooth_t;
+            cur_y = base_y + Math.sin (glide_t * Math.PI * last_idx) * 3.5;
+        } else if (t_ms < 9200) {
+            cur_x = centers_x[last_idx];
+            cur_y = base_y;
+            if (t_ms >= 8200 && !dock_click1_done) {
+                dock_click1_done = true;
+                pulse_dock_cursor ();
+            }
+        } else if (t_ms < 12800) {
+            double back_t = (t_ms - 9200) / 3600.0;
+            double target_index = last_idx - back_t * (last_idx - lsw_idx);
+            int i0 = (int) Math.ceil (target_index);
+            int i1 = int.max (lsw_idx, (int) Math.floor (target_index));
+            double local_t = i0 - target_index;
+            double smooth_t = local_t * local_t * (3 - 2 * local_t);
+            cur_x = centers_x[i0] + (centers_x[i1] - centers_x[i0]) * smooth_t;
+            cur_y = base_y + Math.sin (back_t * Math.PI * 2) * 3;
+        } else if (t_ms < 14400) {
+            cur_x = centers_x[lsw_idx];
+            cur_y = base_y;
+            if (t_ms >= 13400 && !dock_click2_done) {
+                dock_click2_done = true;
+                pulse_dock_cursor ();
+            }
+        } else {
+            double final_t = (t_ms - 14400) / 600.0;
+            cur_x = centers_x[lsw_idx];
+            cur_y = base_y + final_t * 8;
+        }
+
+        taskbar.move (dock_cursor, cur_x - 8, cur_y - 8);
+
+        // Proximity-based pop, eased toward its target each frame so the
+        // icons ease in/out instead of snapping (mirrors the web
+        // version's is-popped / is-adjacent hover states + transition).
+        int closest = 0;
+        double min_dist = double.MAX;
+        for (int i = 0; i < n; i++) {
+            double dist = Math.fabs (cur_x - centers_x[i]);
+            if (dist < min_dist) { min_dist = dist; closest = i; }
+        }
+        for (int i = 0; i < n; i++) {
+            int diff = i - closest;
+            if (diff < 0) diff = -diff;
+            bool popped   = (i == closest && min_dist < 38);
+            bool adjacent = (!popped && min_dist < 64 && diff == 1);
+
+            double target_lift = popped ? 16.0 : (adjacent ? 6.0 : 0.0);
+            dock_icon_lift[i] += (target_lift - dock_icon_lift[i]) * 0.25;
+            taskbar.move (dock_icon_frames[i],
+                          DOCK_START_X + i * DOCK_SPACING,
+                          DOCK_ICON_Y - dock_icon_lift[i]);
+
+            var icon_box = dock_icon_frames[i].get_data<Gtk.Widget> ("icon-box");
+            if (icon_box != null) {
+                icon_box.remove_css_class ("oobe-dock-icon-popped");
+                icon_box.remove_css_class ("oobe-dock-icon-adjacent");
+                if (popped)   icon_box.add_css_class ("oobe-dock-icon-popped");
+                if (adjacent) icon_box.add_css_class ("oobe-dock-icon-adjacent");
+            }
+        }
+
+        return GLib.Source.CONTINUE;
+    }
+
+    private void stop_dock_animation () {
+        if (dock_tick_id != 0 && dock_taskbar != null) {
+            dock_taskbar.remove_tick_callback (dock_tick_id);
+        }
+        dock_tick_id = 0;
+    }
+
     private Adw.NavigationPage build_installing_page () {
         var content = new Gtk.Box (Gtk.Orientation.VERTICAL, 20);
         content.append (oobe_heading (
             t ("Installing KibaOS", "KibaOS Kuruluyor", "Instalowanie KibaOS"),
             t ("Sit tight — this won't take long.", "Biraz bekleyin — çok sürmeyecek.", "Chwila cierpliwości — to nie potrwa długo.")));
 
-        progress_bar = new Gtk.ProgressBar () { show_text = false };
+        // Taskbar animation, ported from the KibaOS web loading intro --
+        // something more engaging than a static wait, which is exactly
+        // what research on long-running progress UX recommends: occupied
+        // waiting reads as shorter than unoccupied waiting.
+        content.append (build_install_dock ());
+
+        // show_text: research on progress indicators is consistent that a
+        // determinate bar should pair its fill with a visible percentage,
+        // not just a status string -- percentage answers "how much is
+        // left", status answers "what's happening", and users want both.
+        progress_bar = new Gtk.ProgressBar () { show_text = true };
         progress_bar.add_css_class ("oobe-progress");
         content.append (progress_bar);
 
@@ -1303,6 +1538,7 @@ public class KibaOOBE : Adw.Application {
                     int    pct = int.parse (parts[0]);
                     string msg = parts.length > 1 ? parts[1] : "";
                     progress_bar.fraction = pct / 100.0;
+                    progress_bar.text     = "%d%%".printf (pct);
                     progress_label.label  = msg;
                 } else if (line.has_prefix ("FATAL: ")) {
                     // Captured now that stderr is merged in — keep the real
@@ -1312,6 +1548,7 @@ public class KibaOOBE : Adw.Application {
             }
             yield proc.wait_async ();
             stop_feature_slideshow ();
+            stop_dock_animation ();
             if (proc.get_exit_status () == 0) {
                 nav_view.push (build_done_page ());
             } else if (last_fatal_message != "") {
@@ -1327,6 +1564,7 @@ public class KibaOOBE : Adw.Application {
             }
         } catch (GLib.Error e) {
             stop_feature_slideshow ();
+            stop_dock_animation ();
             progress_label.label = t ("Lost connection to installer: %s",
                                        "Kurulum programıyla bağlantı kesildi: %s",
                                        "Utracono połączenie z instalatorem: %s").printf (e.message);
@@ -1337,4 +1575,3 @@ public class KibaOOBE : Adw.Application {
         return new KibaOOBE ().run (args);
     }
 }
-
