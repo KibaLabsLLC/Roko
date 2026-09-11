@@ -1,2 +1,2 @@
-# Finn
+# Roko
 The KibaOS Installer
