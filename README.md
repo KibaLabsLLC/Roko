@@ -1,7 +1,6 @@
-# Rōkō (狼吼) — “wolf's howl”
+# ✦  Rōkō (狼吼) — “wolf's howl” ✦ 
 
-The fullscreen, one-step-per-screen out-of-box-experience installer for
-KibaOS.
+### The fullscreen, one-step-per-screen out-of-box-experience installer for KibaOS.
 
 ## Layout
 
