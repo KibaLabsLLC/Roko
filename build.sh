@@ -15,6 +15,8 @@ pacman -S --noconfirm --needed gtk4 libadwaita libgee vala meson ninja base-deve
 # drop this from the dependency list again.
 # dosfstools -> mkfs.fat, used by kiba_fs.c to format the ESP.
 # polkit -> pkexec, used by winapps-setup.vala's own elevation calls.
+# gptfdisk -> sgdisk, used by kiba_gpt.c to write the GPT.
+# squashfs-tools -> unsquashfs, used by kiba_install_extract_image().
 
 # ── OOBE frontend (Vala/GTK4/libadwaita): io.kibaos.oobe + io.kibaos.winapps-setup
 cd "$(dirname "$0")/src"
@@ -32,13 +34,26 @@ cd -
 
 # ── Privileged backend: libkibadisk + kibaos-oobe-backend
 cd "$(dirname "$0")/src/disk"
-make
+make || { echo "FATAL: make failed for kibaos-oobe-backend — check the C compile errors above." >&2; exit 1; }
+# `make` only compiles the binary into this directory — it does NOT
+# install it anywhere on $PATH. Without this step the binary sits here,
+# never makes it onto the ISO's squashfs, and the frontend's spawn of
+# "kibaos-oobe-backend" fails with ENOENT at install time on a real
+# machine, silently, with no log written (log_init() never even runs).
+# Do not drop this line again.
+install -Dm755 kibaos-oobe-backend /usr/local/bin/kibaos-oobe-backend
 cd -
 
-if [ -x /usr/bin/io.kibaos.oobe ]; then
+# Checks BOTH binaries now. The old version of this check only looked
+# for io.kibaos.oobe (the frontend) and printed a success message even
+# when kibaos-oobe-backend was never installed — which is exactly the
+# bug that got us here. Don't narrow this back down to one binary.
+if [ -x /usr/bin/io.kibaos.oobe ] && [ -x /usr/local/bin/kibaos-oobe-backend ]; then
   echo "=== KibaOS OOBE installer is the active install path ==="
 else
   echo "=== WARNING: KibaOS OOBE installer binary not found post-build ===" >&2
+  [ -x /usr/bin/io.kibaos.oobe ]              || echo "    missing: /usr/bin/io.kibaos.oobe" >&2
+  [ -x /usr/local/bin/kibaos-oobe-backend ]   || echo "    missing: /usr/local/bin/kibaos-oobe-backend" >&2
   exit 1
 fi
 
