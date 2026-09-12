@@ -33,6 +33,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/mount.h>
 #include <linux/fs.h>
 #include <sys/stat.h>
 #include <time.h>
@@ -132,6 +133,65 @@ static void kiba_force_reread_partition_table(const char *disk)
 
     (void)ioctl(fd, BLKRRPART, NULL);
     close(fd);
+}
+
+/*
+ * Bind-mounts /dev and /sys, and mounts a fresh /proc, into the target
+ * root so that anything run inside a chroot()'d target_root later
+ * (useradd here, plus whatever kiba_install_finalize() execs for
+ * mkinitcpio/the bootloader, and previously locale-gen) has a working
+ * /proc, /dev, /sys to run against.
+ *
+ * Before this, the "Prepare chroot environment" step only mkdir'd these
+ * three directories -- they existed, but were always empty. glibc and
+ * most coreutils/shadow-utils tools read /proc at startup (e.g. to
+ * resolve their own /proc/self/exe, or /proc/mounts), so with nothing
+ * mounted there, anything exec'd inside the chroot fails in ways that
+ * look like "can't execute" rather than a clean, specific error --
+ * which matches useradd (and, before it was removed, locale-gen) both
+ * failing here with no more specific reason attached.
+ */
+static bool kiba_mount_chroot_special(const char *target_root)
+{
+    char dev_path[320];
+    char proc_path[320];
+    char sys_path[320];
+
+    snprintf(dev_path, sizeof(dev_path), "%s/dev", target_root);
+    snprintf(proc_path, sizeof(proc_path), "%s/proc", target_root);
+    snprintf(sys_path, sizeof(sys_path), "%s/sys", target_root);
+
+    if (mount("/dev", dev_path, NULL, MS_BIND | MS_REC, NULL) != 0)
+        return false;
+
+    if (mount("proc", proc_path, "proc", 0, NULL) != 0)
+        return false;
+
+    if (mount("/sys", sys_path, NULL, MS_BIND | MS_REC, NULL) != 0)
+        return false;
+
+    return true;
+}
+
+/*
+ * Reverse of kiba_mount_chroot_special(). Uses MNT_DETACH (lazy
+ * unmount) so a mount that's still momentarily busy -- e.g. a udev
+ * worker with an open handle somewhere under /dev -- can't wedge the
+ * very last step of the install.
+ */
+static void kiba_unmount_chroot_special(const char *target_root)
+{
+    char dev_path[320];
+    char proc_path[320];
+    char sys_path[320];
+
+    snprintf(dev_path, sizeof(dev_path), "%s/dev", target_root);
+    snprintf(proc_path, sizeof(proc_path), "%s/proc", target_root);
+    snprintf(sys_path, sizeof(sys_path), "%s/sys", target_root);
+
+    umount2(sys_path, MNT_DETACH);
+    umount2(proc_path, MNT_DETACH);
+    umount2(dev_path, MNT_DETACH);
 }
 
 int main(int argc, char **argv)
@@ -622,6 +682,13 @@ int main(int argc, char **argv)
             target_root
         );
         (void)mkdir(p, 0755);
+
+        if (!kiba_mount_chroot_special(target_root)) {
+            fail(
+                "Could not mount /dev, /proc, or /sys into the "
+                "target system."
+            );
+        }
     }
 
     /*
@@ -706,6 +773,7 @@ int main(int argc, char **argv)
         "Finishing up..."
     );
 
+    kiba_unmount_chroot_special(target_root);
     kiba_fs_umount(boot_dir);
     kiba_fs_umount(target_root);
 
