@@ -586,6 +586,24 @@ int kiba_install_finalize(const char *target_root, const char *disk_path,
 
         snprintf(path, sizeof(path), "%s/boot/loader/entries/kibaos.conf", target_root);
         char entry[1024];
+        /* eMMC/SD (mmcblk*) controllers -- common on Chromebooks, including
+         * ones that also carry a microSD slot -- have a well-documented
+         * class of Command Queue Engine (CQE) bugs in the kernel's sdhci
+         * driver: under the sustained heavy writes an OS install does
+         * (unsquashfs extraction is the biggest one), the eMMC can throw
+         * I/O errors or corrupt data outright, which is a very different
+         * failure from anything in this installer -- the files just never
+         * made it onto disk correctly, so whatever's missing/truncated in
+         * target_root fails silently once arch-chroot tries to exec it
+         * later. sdhci.debug_quirks=0x20000 disables the CQE and has been
+         * the documented workaround for exactly this on other Chromebook
+         * Linux installs; carrying it into the INSTALLED system's own boot
+         * entry (not just the live/installer session) keeps it fixed after
+         * first boot too, same as other install guides have had to do by
+         * hand. Only added when the target disk is actually mmcblk* --
+         * harmless to skip on NVMe/SATA/virtio disks that were never
+         * running through this driver in the first place. */
+        bool is_mmc_storage = disk_path != NULL && strstr(disk_path, "mmcblk") != NULL;
         snprintf(entry, sizeof(entry),
                  "title KibaOS\n"
                  "linux /vmlinuz-linux\n"
@@ -593,15 +611,14 @@ int kiba_install_finalize(const char *target_root, const char *disk_path,
                  "options root=UUID=%s rw quiet splash loglevel=3 "
                  "rd.udev.log_level=3 vt.global_cursor_default=0 "
                  "plymouth.use-simpledrm=1 "
-                 "lsm=landlock,lockdown,yama,integrity,apparmor,bpf\n",
-                 root_uuid);
+                 "lsm=landlock,lockdown,yama,integrity,apparmor,bpf%s\n",
+                 root_uuid, is_mmc_storage ? " sdhci.debug_quirks=0x20000" : "");
         if (write_file(path, entry) != 0) {
             snprintf(g_finish_err, sizeof(g_finish_err), "writing boot entry failed");
             return -1;
         }
     }
 
-    (void)disk_path;   /* no longer needed -- bootctl resolves the ESP's disk from the /boot mountpoint itself */
     (void)root_partno; /* no longer needed -- bootctl resolves the ESP's partition number the same way */
 
     if (cb) cb(88, "Turning on background features...", user_data);
