@@ -34,6 +34,7 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <linux/fs.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 
