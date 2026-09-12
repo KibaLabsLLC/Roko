@@ -1,0 +1,405 @@
+/* kibaos_oobe_backend_main.c — the privileged install orchestrator.
+ *
+ * Invoked via sudo (no D-Bus/polkit dependency): `sudo /usr/local/bin/kibaos-oobe-backend
+ * <disk> <mode> <locale> <keymap> <hostname> <username> <password>` — argv,
+ * no shell, per the injection fix already applied on the Vala side.
+ * <mode> is "erase" (wipe the whole disk, original behavior) or
+ * "alongside" (dual-boot: keep whatever's already on the disk, reuse its
+ * existing ESP, and install KibaOS into the largest free-space gap).
+ * Windows app support (WinApps) is a listed, always-on feature, not a
+ * user choice: this always drops /etc/kibaos/winapps-pending under
+ * target_root so kibaos-winapps-firstrun.desktop (see WINDOWS APP SUPPORT
+ * below) offers the WinApps setup wizard on first login into the freshly
+ * installed system.
+ *
+ * Internally this no longer touches archinstall, parted, blkid, or
+ * partprobe as subprocesses: all of that is libkibadisk (kiba_gpt.c /
+ * kiba_fs.c / kiba_udev.c). The only external tools left are the ones
+ * with no sane from-scratch replacement: sgdisk (GPT writer, see
+ * kiba_gpt.c), unsquashfs, useradd/chpasswd, bootctl,
+ * mkinitcpio, locale-gen, pacman -- all invoked via argv
+ * arrays inside libkibadisk, never through a shell.
+ *
+ * Output protocol is unchanged on purpose: "PROGRESS <pct> <msg>" on
+ * stdout, one line, matching what main.vala's read_backend_output()
+ * already parses. Nothing on the Vala side needs to change.
+ */
+#define _GNU_SOURCE
+#include "kiba_gpt.h"
+#include "kiba_fs.h"
+#include "kiba_udev.h"
+#include "kiba_install.h"
+
+#include <fcntl.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
+#include <sys/ioctl.h>
+#include <linux/fs.h>   /* BLKRRPART */
+#include <time.h>
+#include <unistd.h>
+
+static FILE *g_logfp = NULL;
+
+static void log_init(void) {
+    /* Open (create/append) the log file the UI tells the user to check.
+     * Nothing upstream of this ever actually opened it before now — the
+     * backend only wrote to stdout/stderr, which the frontend silently
+     * dropped half of (see SubprocessLauncher fix in the Vala frontend:
+     * it only piped STDOUT, so every FATAL: line on stderr went nowhere). */
+    g_logfp = fopen("/var/log/kibaos-oobe.log", "a");
+    if (g_logfp) {
+        setvbuf(g_logfp, NULL, _IOLBF, 0); /* line-buffered: survives a crash/kill */
+        time_t now = time(NULL);
+        fprintf(g_logfp, "\n=== kibaos-oobe-backend started %s", ctime(&now));
+        fflush(g_logfp);
+    }
+    /* Non-fatal if this fails (e.g. /var/log not writable yet at this point
+     * in boot) — we still have stdout/stderr as a fallback, just no file. */
+}
+
+static void progress(int pct, const char *msg) {
+    printf("PROGRESS %d %s\n", pct, msg);
+    fflush(stdout);
+    if (g_logfp) { fprintf(g_logfp, "PROGRESS %d %s\n", pct, msg); fflush(g_logfp); }
+}
+
+static void progress_cb(int pct, const char *msg, void *ud) {
+    (void)ud;
+    progress(pct, msg);
+}
+
+static void fail(const char *msg) {
+    progress(100, msg);
+    fprintf(stderr, "FATAL: %s\n", msg);
+    if (g_logfp) { fprintf(g_logfp, "FATAL: %s\n", msg); fflush(g_logfp); fclose(g_logfp); }
+    exit(1);
+}
+
+/* VM detection is no longer used to refuse installation here (see the
+ * matching change in the Vala frontend's is_running_in_vm() comment) --
+ * virtual disk handling has been solid enough in practice that the
+ * original blanket refusal was pure friction, not a real safeguard. */
+
+/* Builds the device path for partition number `n` of `disk` into `buf`.
+ * Real rule (confirmed against ArchWiki's device-naming page): if the
+ * disk's device name ends in a digit, partitions get a 'p' separator
+ * (/dev/loop0p1, /dev/nvme0n1p1); otherwise they don't (/dev/vda1,
+ * /dev/sda1). This is NOT about which driver/bus is involved (virtio vs
+ * nvme vs scsi) -- it's purely about whether the trailing character of
+ * the disk name is already a digit, which would otherwise make "loop01"
+ * ambiguous (loop-1 vs loop0-partition-1). Checking for "nvme"/"mmcblk"
+ * by substring was the previous (wrong) approach -- it happened to work
+ * for /dev/vda by accident, but failed for /dev/loop0. */
+static void partition_path(const char *disk, int n, char *buf, size_t buf_len) {
+    size_t disk_len = strlen(disk);
+    bool ends_in_digit = disk_len > 0 && disk[disk_len - 1] >= '0' && disk[disk_len - 1] <= '9';
+    if (ends_in_digit) snprintf(buf, buf_len, "%sp%d", disk, n);
+    else                snprintf(buf, buf_len, "%s%d", disk, n);
+}
+
+/* Force the kernel to re-read the partition table right now, rather
+ * than relying on it to notice on its own before kiba_wait_for_device()
+ * starts polling below. Direct ioctl instead of shelling out to
+ * `blockdev --rereadpt`: run_argv() is a static helper private to the
+ * libkibadisk translation units, not visible here, and this is a
+ * one-line kernel call anyway -- no subprocess needed. */
+static void kiba_force_reread_partition_table(const char *disk) {
+    int fd = open(disk, O_RDONLY);
+    if (fd < 0) return; /* best-effort */
+    ioctl(fd, BLKRRPART, NULL); /* best-effort, ignore rc -- if this
+                                  * fails, kiba_wait_for_device() below
+                                  * will time out and surface it */
+    close(fd);
+}
+
+int main(int argc, char **argv) {
+    log_init();
+    if (argc != 8) {
+        fprintf(stderr,
+            "usage: %s <disk> <mode: erase|alongside> <locale> <keymap> <hostname> <username> <password>\n",
+            argv[0]);
+        return 2;
+    }
+    const char *disk     = argv[1];
+    const char *mode     = argv[2];
+    const char *locale   = argv[3];
+    const char *keymap   = argv[4];
+    const char *hostname = argv[5];
+    const char *username = argv[6];
+    const char *password = argv[7];
+
+    bool dualboot = (strcmp(mode, "alongside") == 0);
+    if (!dualboot && strcmp(mode, "erase") != 0) {
+        fail("Unknown install mode (expected 'erase' or 'alongside').");
+    }
+
+    const char *target_root = "/mnt/kibaos-install";
+    char esp_part[300], root_part[300];
+    int esp_partno = 0, root_partno = 0;
+
+    /* ── 1-2. Probe + partition (GPT via sgdisk) ───────────────────── */
+    progress(2, "Reading disk information...");
+    uint32_t ssz = 0;
+    uint64_t total_sectors = 0;
+    if (kiba_gpt_probe_device(disk, &ssz, &total_sectors) != 0) {
+        fail("Could not read disk information.");
+    }
+
+    if (!dualboot) {
+        /* ── Whole-disk install: wipe and lay down a fresh GPT ───────── */
+        progress(6, "Partitioning disk...");
+        int disk_fd = open(disk, O_RDWR);
+        if (disk_fd < 0) fail("Could not open disk for writing.");
+
+        /* Layout: 512MiB ESP (FAT32) + remainder as Linux root (ext4),
+         * matching the layout the old archinstall-based backend used.
+         *
+         * Deliberately NOT re-deriving first/last usable LBAs here by
+         * hand a second time. kiba_gpt_write() already computes them
+         * once, internally, from the real sector size/total sectors and
+         * the standard 128-entry GPT layout -- duplicating that math at
+         * every call site is exactly how the old hand-rolled version
+         * used to drift by a sector or two and get rejected. Just use
+         * the sentinels below and let kiba_gpt_write() own the layout:
+         * KIBA_GPT_FIRST_LBA_DEFAULT / _CONTIGUOUS / KIBA_GPT_LAST_LBA_REST
+         * -- see kiba_gpt_write()'s handling of these sentinels and the
+         * doc comment on kiba_gpt_partition_t. */
+        uint64_t esp_sectors = (512ull * 1024 * 1024) / ssz;
+
+        /* Rough pre-flight sanity check only (not used for the actual
+         * partition layout below) -- catches "disk is way too small"
+         * early with a friendly message instead of a raw sgdisk error. */
+        uint64_t rough_overhead = (128 * 128 + ssz - 1) / ssz + 34;
+        if (esp_sectors + rough_overhead >= total_sectors) {
+            close(disk_fd);
+            fail("Disk is too small for KibaOS (need at least ~1.5GB usable after the EFI partition).");
+        }
+
+        /* Root now gets everything left after the ESP -- the previous
+         * "give root-a only half, leave the rest free for systemd-repart
+         * to carve out root-b" A/B scheme has been removed entirely (see
+         * the TRUE A/B ROOT section, which used to live further down in
+         * this build script and no longer does). KIBA_GPT_LAST_LBA_REST
+         * just fills the rest of the disk -- exactly the "disk too small
+         * for two slots" fallback this code already had, now the only
+         * path, so there's no root_sectors variable left to compute. */
+
+        kiba_gpt_disk_t gdisk = {
+            .fd = disk_fd,
+            .logical_sector_size = ssz,
+            .total_sectors = total_sectors,
+            .disk_guid = {{0}},
+        };
+        kiba_gpt_partition_t parts[2] = {
+            { .name = "KIBAOS-ESP",  .type_guid = KIBA_GUID_ESP,      .unique_guid = {{0}},
+              .first_lba = KIBA_GPT_FIRST_LBA_DEFAULT, .last_lba = esp_sectors, .attributes = 0 },
+            { .name = "KIBAOS-ROOT", .type_guid = KIBA_GUID_LINUX_FS, .unique_guid = {{0}},
+              .first_lba = KIBA_GPT_FIRST_LBA_CONTIGUOUS,
+              .last_lba = KIBA_GPT_LAST_LBA_REST, .attributes = 0 },
+        };
+        uint64_t placed_ends[2] = {0};
+        int rc = kiba_gpt_write(&gdisk, parts, 2, placed_ends);
+        close(disk_fd);
+        if (rc != 0) {
+            char errbuf[256];
+            snprintf(errbuf, sizeof(errbuf), "Partitioning failed: %s", strerror(-rc));
+            fail(errbuf);
+        }
+        esp_partno = 1;
+        root_partno = 2;
+        partition_path(disk, esp_partno,  esp_part,  sizeof(esp_part));
+        partition_path(disk, root_partno, root_part, sizeof(root_part));
+
+        kiba_force_reread_partition_table(disk);
+    } else {
+        /* ── Dual-boot: reuse the existing ESP, use free space only ──── */
+        progress(4, "Looking for an existing EFI partition and free space...");
+        kiba_gpt_scan_result_t scan;
+        if (kiba_gpt_scan(disk, &scan) != 0) {
+            fail("Could not read the existing partition table.");
+        }
+        if (scan.esp_partno == 0) {
+            fail("No existing EFI System Partition was found on this disk -- "
+                 "install alongside needs one already present from the "
+                 "other operating system.");
+        }
+        if (scan.free_last_lba < scan.free_first_lba) {
+            fail("No usable free space was found on this disk to install "
+                 "KibaOS alongside the existing operating system.");
+        }
+        const uint64_t min_root_bytes = 12ull * 1024 * 1024 * 1024; /* 12 GiB floor */
+        if (scan.free_bytes < min_root_bytes) {
+            fail("Not enough free space on this disk to install KibaOS "
+                 "alongside the existing operating system (need at least ~12GB free).");
+        }
+
+        esp_partno = scan.esp_partno;
+        partition_path(disk, esp_partno, esp_part, sizeof(esp_part));
+
+        progress(6, "Creating KibaOS partition in free space...");
+        kiba_gpt_partition_t root = {
+            .name = "KIBAOS-ROOT", .type_guid = KIBA_GUID_LINUX_FS, .unique_guid = {{0}},
+            .first_lba = scan.free_first_lba, .last_lba = scan.free_last_lba, .attributes = 0
+        };
+        int new_partno = 0;
+        int rc = kiba_gpt_add_partition(disk, &root, &new_partno);
+        if (rc != 0) {
+            char errbuf[256];
+            snprintf(errbuf, sizeof(errbuf), "Partitioning failed: %s", strerror(-rc));
+            fail(errbuf);
+        }
+        root_partno = new_partno;
+        partition_path(disk, root_partno, root_part, sizeof(root_part));
+
+        kiba_force_reread_partition_table(disk);
+    }
+
+    /* Wait for the kernel/udev to settle before touching the new
+     * partition nodes -- the actual fix for the original bug report. */
+    if (!kiba_wait_for_device(esp_part, 5000) || !kiba_wait_for_device(root_part, 5000)) {
+        fail("Partition devices never appeared after partitioning.");
+    }
+
+    /* ── 3. Format ─────────────────────────────────────────────────── */
+    progress(10, "Formatting partitions...");
+    if (!dualboot) {
+        if (kiba_fs_format(esp_part, KIBA_FS_FAT32, "KIBAOS-ESP") != 0) {
+            fail(kiba_fs_strerror());
+        }
+        /* mkfs.fat just wrote a brand-new filesystem directly to the
+         * block device -- the kernel/udev have no way to know that
+         * happened on their own (see kiba_trigger_uevent's own comment
+         * in kiba_udev.c for the full story: BLKPG at partition-create
+         * time only covers the partition table, not what gets written
+         * into a partition afterward). Without this, kiba_wait_for_
+         * disk_tag() below could poll a /dev/disk/by-uuid symlink that
+         * either never appears, or -- worse, and silently -- resolves to
+         * a stale UUID left over from whatever was on this partition
+         * before, which is exactly the kind of bug that produces a
+         * clean-looking install that then can't find its own root
+         * filesystem on first boot. */
+        kiba_trigger_uevent(esp_part);
+    }
+    /* Dual-boot: the ESP already belongs to the other OS and already has
+     * a filesystem on it, plus that OS's own boot files -- formatting it
+     * would destroy them. bootctl install (further down) only ever adds
+     * systemd-boot's own files there, so we deliberately never touch the ESP's
+     * filesystem in this mode. */
+    if (kiba_fs_format(root_part, KIBA_FS_EXT4, "KIBAOS-ROOT") != 0) {
+        fail(kiba_fs_strerror());
+    }
+    kiba_trigger_uevent(root_part); /* same reasoning as the ESP one above */
+
+    /* ── 4. Mount ──────────────────────────────────────────────────── */
+    progress(14, "Mounting target filesystem...");
+    mkdir(target_root, 0755);
+    if (kiba_fs_mount(root_part, target_root, "ext4", NULL) != 0) fail(kiba_fs_strerror());
+    char boot_dir[320];
+    snprintf(boot_dir, sizeof(boot_dir), "%s/boot", target_root);
+    mkdir(boot_dir, 0755);
+    if (kiba_fs_mount(esp_part, boot_dir, "vfat", NULL) != 0) fail(kiba_fs_strerror());
+
+    /* ── 5-6. Find + extract the live image onto the new root ───────── */
+    char image_path[512];
+    progress(18, "Locating KibaOS system image...");
+    if (!kiba_find_live_image(image_path, sizeof(image_path))) {
+        fail("Could not locate the KibaOS system image on the boot medium.");
+    }
+    if (kiba_install_extract_image(image_path, target_root, progress_cb, NULL) != 0) {
+        fail(kiba_install_strerror());
+    }
+
+    /* mkarchiso strips vmlinuz-linux/initramfs-linux.img out of the
+     * airootfs before building the image extracted above -- pull them
+     * back in from the boot medium or the install has no kernel. */
+    progress(70, "Copying kernel to target system...");
+    if (kiba_install_copy_kernel(image_path, target_root) != 0) {
+        fail(kiba_install_strerror());
+    }
+
+    /* ── 7. Write fstab, locale, hostname using the filesystem UUIDs
+     *     mkfs.fat/mkfs.ext4 just generated ──────────────────────────── */
+    progress(72, "Writing system configuration...");
+    char root_uuid[64], esp_uuid[64];
+
+    /* fstab uses the filesystem UUID (not the GPT PARTUUID), matching
+     * the old backend's behavior. The actual UUID was generated by
+     * mkfs.ext4/mkfs.fat during formatting above; we read it back via
+     * udev's /dev/disk/by-uuid symlinks (systemd-udevd is always
+     * running on the real install target, so this is reliable there
+     * -- now that kiba_trigger_uevent() forces a fresh probe right
+     * after each format call above. Without that trigger this could
+     * previously read back a stale UUID left over from a partition's
+     * PREVIOUS filesystem on a disk that had been installed to before,
+     * since udev has no way to notice a raw mkfs write on its own --
+     * see kiba_trigger_uevent's comment in kiba_udev.c for the full
+     * story, and note this can't be exercised in a udev-less sandbox
+     * even though it can't be exercised in a udev-less sandbox). */
+    if (!kiba_wait_for_disk_tag(root_part, "by-uuid", root_uuid, sizeof(root_uuid), 8000)) {
+        fail("Could not determine root filesystem UUID after formatting.");
+    }
+    if (!kiba_wait_for_disk_tag(esp_part, "by-uuid", esp_uuid, sizeof(esp_uuid), 8000)) {
+        fail("Could not determine ESP filesystem UUID after formatting.");
+    }
+
+    if (kiba_install_write_configs(target_root, root_uuid, esp_uuid,
+                                    hostname, locale, keymap) != 0) {
+        fail(kiba_install_strerror());
+    }
+
+    /* ── 8. Bind mounts for chroot operations ────────────────────────── */
+    progress(76, "Preparing system for configuration...");
+    {
+        char p[320];
+        snprintf(p, sizeof(p), "%s/dev", target_root);  mkdir(p, 0755);
+        snprintf(p, sizeof(p), "%s/proc", target_root); mkdir(p, 0755);
+        snprintf(p, sizeof(p), "%s/sys", target_root);  mkdir(p, 0755);
+    }
+
+    progress(78, "Generating locale...");
+    if (kiba_install_locale_gen(target_root) != 0) fail(kiba_install_strerror());
+
+    /* ── 9. User account ───────────────────────────────────────────── */
+    progress(82, "Creating your account...");
+    if (kiba_install_create_user(target_root, username, password) != 0) {
+        fail(kiba_install_strerror());
+    }
+
+    /* ── 10. Bootloader, services, initramfs ─────────────────────────── */
+    if (kiba_install_finalize(target_root, disk, root_part, root_uuid, root_partno, dualboot,
+                               progress_cb, NULL) != 0) {
+        fail(kiba_install_strerror());
+    }
+
+    /* ── 11. Windows app support ────────────────────────────────────────
+     * Listed as a standing feature, not opt-in, so this always drops the
+     * marker inside the freshly installed root -- the actual setup wizard
+     * (kibaos-winapps-setup) only ever runs later, on first login into the
+     * *installed* system via kibaos-winapps-firstrun.desktop, never from
+     * in here. Mirrors the exact same marker kibaos-oem-finish.sh drops
+     * for OEM-finish mode, just written under target_root instead of the
+     * live root since this path is a fresh install, not an already-booted
+     * system. */
+    {
+        char p[320];
+        snprintf(p, sizeof(p), "%s/etc/kibaos", target_root);
+        mkdir(p, 0755); /* ignore EEXIST -- /etc already exists under target_root */
+        snprintf(p, sizeof(p), "%s/etc/kibaos/winapps-pending", target_root);
+        FILE *f = fopen(p, "w");
+        if (f) fclose(f); /* best-effort: a missed marker just means the
+                            * user runs "Set Up Windows Workspace" from the
+                            * app menu themselves instead of it prompting them */
+    }
+
+    progress(98, "Finishing up...");
+    kiba_fs_umount(boot_dir);
+    kiba_fs_umount(target_root);
+
+    progress(100, "Done");
+    return 0;
+}
