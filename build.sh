@@ -5,7 +5,7 @@
 set -ex
 
 pacman -S --noconfirm --needed gtk4 libadwaita libgee vala meson ninja base-devel \
-    rsync polkit arch-install-scripts dosfstools
+    rsync polkit arch-install-scripts dosfstools gptfdisk squashfs-tools
 
 # arch-install-scripts -> arch-chroot: everything kiba_install_finish.c's
 # chroot_run() shells out to (bootctl, locale-gen, useradd, chpasswd,
