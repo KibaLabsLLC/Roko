@@ -38,7 +38,7 @@ public class KibaOOBE : Adw.Application {
     }
 
     // ── Dark mode ─────────────────────────────────────────────────────
-    private bool is_dark = true;
+    private bool is_dark = false;
 
     private void apply_dark_mode () {
         if (is_dark) window.add_css_class ("dark");
@@ -119,10 +119,10 @@ public class KibaOOBE : Adw.Application {
         window.notify["fullscreened"].connect (() => {
             if (!window.fullscreened) window.fullscreen ();
         });
-        // Default to dark mode; the toggle on every page still lets the
-        // user switch to light from there.
-        Adw.StyleManager.get_default ().color_scheme = Adw.ColorScheme.FORCE_DARK;
-        is_dark = true;
+        // Default to light mode; the toggle on every page still lets the
+        // user switch to dark from there.
+        Adw.StyleManager.get_default ().color_scheme = Adw.ColorScheme.FORCE_LIGHT;
+        is_dark = false;
         apply_dark_mode ();
         nav_view = new Adw.NavigationView ();
         window.set_content (nav_view);
@@ -611,7 +611,21 @@ public class KibaOOBE : Adw.Application {
 
         refresh_networks ();
 
-        content.append (list_box);
+        // Capped height + internal scrolling: an unbounded list_box grows
+        // the whole card taller than the screen once enough networks are
+        // in range, pushing the Next/Back row below the visible area with
+        // no way to reach it. Scrolling inside a fixed-height pane keeps
+        // the nav row anchored in place regardless of how many networks
+        // show up.
+        var list_scroller = new Gtk.ScrolledWindow () {
+            hscrollbar_policy   = Gtk.PolicyType.NEVER,
+            vscrollbar_policy   = Gtk.PolicyType.AUTOMATIC,
+            max_content_height  = 280,
+            propagate_natural_height = true
+        };
+        list_scroller.set_child (list_box);
+
+        content.append (list_scroller);
         content.append (status_label);
 
         // Periodic rescan so networks that come into/out of range while
@@ -905,6 +919,22 @@ public class KibaOOBE : Adw.Application {
             string rest    = parts.length > 1 ? parts[1].strip () : "";
             if (rest.has_suffix (" 1") || rest == "1") continue;
             if (GLib.Path.get_basename (devpath) == boot_dev) continue;
+            // eMMC storage (common on Chromebooks, e.g. mmcblk1) exposes its
+            // two hardware boot partitions and the RPMB partition as their
+            // OWN top-level block devices -- /dev/mmcblk1boot0,
+            // /dev/mmcblk1boot1, /dev/mmcblk1rpmb -- sitting next to
+            // /dev/mmcblk1 in /sys/block, not nested under it. `lsblk -d`
+            // lists all of them as if they were independent disks, and
+            // -e7,11 (loop, sr) doesn't touch them. They're tiny (4MB),
+            // hardware write-protected (force_ro) by default, and never a
+            // valid install target -- offering one lets GPT/mkfs silently
+            // fail against a read-only device, which then extracts into
+            // nothing and leaves arch-chroot pointed at an empty rootfs
+            // downstream. Filter by the fixed mmcblkNbootN/rpmb naming
+            // pattern rather than trying to detect force_ro generically.
+            try {
+                if (/mmcblk[0-9]+(boot[01]|rpmb)$/.match (devpath)) continue;
+            } catch (GLib.RegexError e) {}
             string label = rest;
             try { label = /\s+[01]$/.replace (label, -1, 0, ""); }
             catch (GLib.RegexError e) {}
@@ -1135,8 +1165,6 @@ public class KibaOOBE : Adw.Application {
     // ══════════════════════════════════════════════════════════════════
     private Gtk.Label      progress_label;
     private Gtk.ProgressBar progress_bar;
-    private Gtk.Stack      feature_stack;
-    private uint            feature_timer_id = 0;
 
     private Adw.NavigationPage build_installing_page () {
         var content = new Gtk.Box (Gtk.Orientation.VERTICAL, 20);
@@ -1152,76 +1180,7 @@ public class KibaOOBE : Adw.Application {
         progress_label.add_css_class ("oobe-subtitle");
         content.append (progress_label);
 
-        // Feature slideshow -- something to actually read while the real
-        // progress line above is stuck on one status for a while (e.g.
-        // "Copying files…" during the unsquashfs step, which takes a lot
-        // longer than everything else combined and gives no finer-grained
-        // updates). Cycles independently of install progress; the two
-        // labels aren't tied together.
-        string[,] features = {
-            { t ("Your computer learns how you use it", "Bilgisayarınız sizi nasıl kullandığınızı öğrenir", "Twój komputer uczy się, jak go używasz"),
-              t ("KibaOS quietly notices your habits and adjusts things to fit — everything stays on your computer.",
-                 "KibaOS alışkanlıklarınızı sessizce fark eder ve buna göre ayarlar yapar — her şey bilgisayarınızda kalır.",
-                 "KibaOS po cichu zauważa Twoje nawyki i odpowiednio się dostosowuje — wszystko zostaje na Twoim komputerze.") },
-            { t ("Built just for this installer", "Sadece bu kurulum için yapıldı", "Zbudowany specjalnie dla tego instalatora"),
-              t ("This setup screen was made specifically for KibaOS, not borrowed from another system.",
-                 "Bu kurulum ekranı özellikle KibaOS için yapıldı, başka bir sistemden alınmadı.",
-                 "Ten ekran instalacji został stworzony specjalnie dla KibaOS, a nie zapożyczony z innego systemu.") },
-            { t ("Starts up fast", "Hızlı açılır", "Szybko się uruchamia"),
-              t ("KibaOS uses your computer's modern startup process, which gets you to the desktop quicker.",
-                 "KibaOS, bilgisayarınızın modern açılış sürecini kullanır ve bu sayede masaüstüne daha hızlı ulaşırsınız.",
-                 "KibaOS korzysta z nowoczesnego procesu uruchamiania komputera, dzięki czemu szybciej trafiasz na pulpit.") },
-            { t ("Fixes small problems on its own", "Küçük sorunları kendi kendine çözer", "Samodzielnie naprawia drobne problemy"),
-              t ("If something starts acting up, KibaOS notices and tries to repair it automatically.",
-                 "Bir şey tuhaf davranmaya başlarsa, KibaOS bunu fark eder ve otomatik olarak onarmaya çalışır.",
-                 "Jeśli coś zacznie działać nieprawidłowo, KibaOS to zauważy i spróbuje to automatycznie naprawić.") },
-            { t ("Ready to play your videos and music", "Videolarınızı ve müziklerinizi oynatmaya hazır", "Gotowy do odtwarzania Twoich filmów i muzyki"),
-              t ("A video player and everything it needs are already installed — nothing extra to download.",
-                 "Bir video oynatıcı ve ihtiyaç duyduğu her şey zaten kurulu — indirmeniz gereken ekstra bir şey yok.",
-                 "Odtwarzacz wideo i wszystko, czego potrzebuje, jest już zainstalowane — nie trzeba niczego dodatkowo pobierać.") }
-        };
-
-        feature_stack = new Gtk.Stack () {
-            transition_type = Gtk.StackTransitionType.CROSSFADE,
-            transition_duration = 420,
-            margin_top = 40,
-            halign = Gtk.Align.CENTER
-        };
-        feature_stack.add_css_class ("oobe-feature-stack");
-        for (int i = 0; i < features.length[0]; i++) {
-            var pane = new Gtk.Box (Gtk.Orientation.VERTICAL, 6) { halign = Gtk.Align.CENTER };
-            var f_title = new Gtk.Label (features[i, 0]) { halign = Gtk.Align.CENTER, justify = Gtk.Justification.CENTER };
-            f_title.add_css_class ("oobe-feature-title");
-            var f_body = new Gtk.Label (features[i, 1]) {
-                halign = Gtk.Align.CENTER, justify = Gtk.Justification.CENTER, wrap = true, max_width_chars = 46
-            };
-            f_body.add_css_class ("oobe-feature-body");
-            pane.append (f_title);
-            pane.append (f_body);
-            feature_stack.add_named (pane, i.to_string ());
-        }
-        feature_stack.visible_child_name = "0";
-        content.append (feature_stack);
-
-        int feature_index = 0;
-        int feature_count = features.length[0];
-        feature_timer_id = GLib.Timeout.add_seconds (5, () => {
-            feature_index = (feature_index + 1) % feature_count;
-            feature_stack.visible_child_name = feature_index.to_string ();
-            return GLib.Source.CONTINUE;
-        });
-
         return make_page ("Installing", content, null, null, true);
-    }
-
-    // Stops the feature-slideshow timer -- called once install finishes
-    // (success or failure) so it doesn't keep firing against a stack that
-    // no longer has a reason to update once this page is behind us.
-    private void stop_feature_slideshow () {
-        if (feature_timer_id != 0) {
-            GLib.Source.remove (feature_timer_id);
-            feature_timer_id = 0;
-        }
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -1311,7 +1270,6 @@ public class KibaOOBE : Adw.Application {
                 }
             }
             yield proc.wait_async ();
-            stop_feature_slideshow ();
             if (proc.get_exit_status () == 0) {
                 nav_view.push (build_done_page ());
             } else if (last_fatal_message != "") {
@@ -1326,7 +1284,6 @@ public class KibaOOBE : Adw.Application {
                     "Coś poszło nie tak. Szczegóły znajdziesz w /var/log/kibaos-oobe.log.");
             }
         } catch (GLib.Error e) {
-            stop_feature_slideshow ();
             progress_label.label = t ("Lost connection to installer: %s",
                                        "Kurulum programıyla bağlantı kesildi: %s",
                                        "Utracono połączenie z instalatorem: %s").printf (e.message);
@@ -1337,4 +1294,3 @@ public class KibaOOBE : Adw.Application {
         return new KibaOOBE ().run (args);
     }
 }
-
