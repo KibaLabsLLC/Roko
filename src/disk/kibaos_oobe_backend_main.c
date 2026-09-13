@@ -297,6 +297,51 @@ static void kiba_gdm_copy_and_disable_autologin(const char *target_root) {
     kiba_gdm_disable_autologin(dst_conf);
 }
 
+/* Seeds the fresh install's own AccountsService entry for the account
+ * that was just created, so GDM has an explicit per-user session
+ * preference to fall back on instead of its own built-in default.
+ *
+ * The ISO build already does exactly this for the two accounts it
+ * knows about ahead of time -- "liveuser" and "oem" each get a
+ * /var/lib/AccountsService/users/<name> file with Session=budgie-desktop
+ * / XSession=budgie-desktop baked in at build time. But the account this
+ * backend creates in kiba_install_create_user() doesn't exist until an
+ * actual install runs, so it was never covered by that build-time step
+ * and picks up no seed at all. Without one, GDM has no per-user record
+ * to consult on first login and falls back to its own default session
+ * -- which is GNOME, not the Budgie-on-labwc session KibaOS actually
+ * ships -- so the greeter shows "GNOME" pre-selected instead of "Budgie
+ * Desktop on labwc" the very first time the real user logs in.
+ *
+ * Same [User]/Session/XSession/SystemAccount=false shape as the
+ * liveuser/oem files, just written under target_root for `username`
+ * instead of at ISO-build time for a fixed account name. Best-effort
+ * and non-fatal, same reasoning as everywhere else in this file that
+ * touches GDM: a spin without GDM/budgie-desktop just has no session
+ * preference to seed, which is a normal case, not an install failure. */
+static void kiba_seed_default_session(const char *target_root, const char *username) {
+    char dir[320];
+    snprintf(dir, sizeof(dir), "%s/var/lib/AccountsService/users", target_root);
+    /* mkdir -p: /var/lib/AccountsService likely doesn't exist yet on a
+     * fresh image (nothing else in this backend creates it), so create
+     * both levels rather than assuming the parent is already there. */
+    char parent[300];
+    snprintf(parent, sizeof(parent), "%s/var/lib/AccountsService", target_root);
+    mkdir(parent, 0755); /* ignore EEXIST */
+    mkdir(dir, 0755);    /* ignore EEXIST */
+
+    char path[352];
+    snprintf(path, sizeof(path), "%s/%s", dir, username);
+    FILE *f = fopen(path, "w");
+    if (!f) return; /* best-effort */
+    fprintf(f,
+        "[User]\n"
+        "Session=budgie-desktop\n"
+        "XSession=budgie-desktop\n"
+        "SystemAccount=false\n");
+    fclose(f);
+}
+
 int main(int argc, char **argv) {
     log_init();
     if (argc != 8) {
@@ -556,9 +601,14 @@ int main(int argc, char **argv) {
      * setting -- see kiba_gdm_copy_and_disable_autologin()'s own
      * comment for why this has to happen in that order (copy, then
      * edit the copy) and why it's best-effort/non-fatal (no GDM on this
-     * spin is a normal case, not an install failure). */
+     * spin is a normal case, not an install failure). Also seeds an
+     * AccountsService entry for the account just created, so GDM
+     * defaults to the Budgie-on-labwc session on first login instead of
+     * falling back to GNOME -- see kiba_seed_default_session()'s own
+     * comment for why that fallback happens at all. */
     progress(84, "Configuring display manager...");
     kiba_gdm_copy_and_disable_autologin(target_root);
+    kiba_seed_default_session(target_root, username);
 
     /* ── 11. Bootloader, services, initramfs ─────────────────────────── */
     if (kiba_install_finalize(target_root, disk, root_part, root_uuid, root_partno, dualboot,
