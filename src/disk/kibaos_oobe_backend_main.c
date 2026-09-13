@@ -30,7 +30,6 @@
 #include "kiba_udev.h"
 #include "kiba_install.h"
 
-#include <dirent.h>
 #include <fcntl.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -118,13 +117,10 @@ static void kiba_force_reread_partition_table(const char *disk) {
     close(fd);
 }
 
-/* Copies a single regular file, preserving permission bits. Symlinks and
- * anything else that isn't S_ISREG are the caller's problem (see
- * kiba_copy_dir_recursive below, which special-cases symlinks itself so
- * this never has to). Best-effort: returns -1 on any failure, but never
- * calls fail()/exits -- GDM's config tree is not load-bearing for the
- * install, just for how the freshly installed system happens to look on
- * first boot. */
+/* Copies a single regular file, preserving permission bits. Best-effort:
+ * returns -1 on any failure, but never calls fail()/exits -- GDM's
+ * config is not load-bearing for the install, just for how the freshly
+ * installed system happens to look on first boot. */
 static int kiba_copy_file(const char *src, const char *dst) {
     struct stat st;
     if (lstat(src, &st) != 0) return -1;
@@ -152,54 +148,6 @@ static int kiba_copy_file(const char *src, const char *dst) {
     close(in_fd);
     close(out_fd);
     return ok ? 0 : -1;
-}
-
-/* Recursively copies src_dir onto dst_dir (dst_dir is created if it
- * doesn't exist). Regular files are copied byte-for-byte via
- * kiba_copy_file(); symlinks are recreated as symlinks (readlink +
- * symlink) rather than followed, since GDM's config tree can contain
- * symlinks like custom.conf -> custom.conf.d snapshots and following
- * them could pull in something unexpected from outside the tree;
- * anything else (device nodes, sockets, fifos -- none of which belong
- * in /etc/gdm) is silently skipped. Best-effort throughout: a failure
- * on any one entry is logged-by-return-code-ignored by the caller and
- * does not abort the copy of the rest of the tree, and does not fail()
- * the install. */
-static void kiba_copy_dir_recursive(const char *src_dir, const char *dst_dir) {
-    struct stat dst_st;
-    if (stat(dst_dir, &dst_st) != 0) {
-        if (mkdir(dst_dir, 0755) != 0) return; /* can't create it, nothing more to do */
-    }
-
-    DIR *d = opendir(src_dir);
-    if (!d) return;
-
-    struct dirent *ent;
-    while ((ent = readdir(d)) != NULL) {
-        if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
-
-        char src_path[1024], dst_path[1024];
-        snprintf(src_path, sizeof(src_path), "%s/%s", src_dir, ent->d_name);
-        snprintf(dst_path, sizeof(dst_path), "%s/%s", dst_dir, ent->d_name);
-
-        struct stat st;
-        if (lstat(src_path, &st) != 0) continue;
-
-        if (S_ISDIR(st.st_mode)) {
-            kiba_copy_dir_recursive(src_path, dst_path);
-        } else if (S_ISLNK(st.st_mode)) {
-            char link_target[1024];
-            ssize_t len = readlink(src_path, link_target, sizeof(link_target) - 1);
-            if (len < 0) continue;
-            link_target[len] = '\0';
-            unlink(dst_path); /* ignore ENOENT -- just clearing the way for symlink() */
-            symlink(link_target, dst_path);
-        } else if (S_ISREG(st.st_mode)) {
-            kiba_copy_file(src_path, dst_path);
-        }
-        /* device nodes / sockets / fifos: skip, not expected under /etc/gdm */
-    }
-    closedir(d);
 }
 
 /* Strips the live session's autologin out of a copied custom.conf.
@@ -295,31 +243,57 @@ static void kiba_gdm_disable_autologin(const char *custom_conf_path) {
     rename(tmp_path, custom_conf_path); /* atomic swap over the original */
 }
 
-/* Copies the live session's /etc/gdm tree onto the freshly installed
- * root, then immediately strips the live-session autologin out of the
- * copy -- so the installed system inherits the live ISO's GDM theming/
- * settings (branding, any custom.conf.d overrides the ISO build ships)
- * without inheriting the one setting ("boot straight into liveuser with
- * no login prompt") that only makes sense on a live medium. Order
- * matters: copy first, then edit the copy in place under target_root,
+/* Copies the live session's GDM config onto the freshly installed root,
+ * then immediately strips the live-session autologin out of the copy.
+ *
+ * "GDM's config tree" turned out not to be a tree at all: GDM has no
+ * LightDM-style conf.d layering (confirmed both against the GDM package
+ * itself and against this same build's own OEM-finish path, which has
+ * to fall back to deleting custom.conf outright for exactly that reason
+ * -- there's no higher-priority drop-in file it could leave instead).
+ * /etc/gdm on a stock install holds exactly one file that matters:
+ * custom.conf. The greeter branding (background, logo, dark mode) isn't
+ * under /etc/gdm either -- it lives in the "gdm" dconf system db
+ * (/etc/dconf/profile/gdm, /etc/dconf/db/gdm.d/*), which is static,
+ * baked into the squashfs at ISO-build time, and already lands on
+ * target_root for free as part of the full image extraction in step
+ * 5-6 above. So a generic recursive directory copy here was solving a
+ * problem that doesn't exist -- it just re-copied /etc/gdm/custom.conf
+ * onto itself (target_root's copy, from image extraction, already had
+ * identical content) while adding real failure modes of its own
+ * (symlink traversal, unbounded recursion, fixed 1024-byte path
+ * buffers) for a directory that never has anything in it to trip them.
+ *
+ * Copying the live system's custom.conf directly (rather than just
+ * editing the one image extraction already placed on target_root) is
+ * still worth doing though: it's the one part of /etc/gdm that plausibly
+ * diverges between the squashfs and the running live session (GDM/the
+ * live session's own runtime state living in the writable overlay, not
+ * the read-only image), so this still copy-then-edits rather than just
+ * edit-in-place -- copy first, then patch the copy under target_root,
  * never the live system's own /etc/gdm/custom.conf.
  *
  * Best-effort and non-fatal by design, same reasoning as the WinApps
  * marker below: a KibaOS variant/spin without GDM (a non-GNOME session)
- * simply has no /etc/gdm to copy, and that is a normal, expected case,
- * not an install failure. */
+ * simply has no /etc/gdm/custom.conf to copy, and that is a normal,
+ * expected case, not an install failure. */
 static void kiba_gdm_copy_and_disable_autologin(const char *target_root) {
+    const char *src_conf = "/etc/gdm/custom.conf";
     struct stat st;
-    if (stat("/etc/gdm", &st) != 0 || !S_ISDIR(st.st_mode)) {
+    if (stat(src_conf, &st) != 0 || !S_ISREG(st.st_mode)) {
         return; /* no GDM on this live medium/spin -- nothing to do */
     }
 
     char dst_gdm[320];
     snprintf(dst_gdm, sizeof(dst_gdm), "%s/etc/gdm", target_root);
-    kiba_copy_dir_recursive("/etc/gdm", dst_gdm);
+    mkdir(dst_gdm, 0755); /* ignore EEXIST -- already present from image extraction */
 
     char dst_conf[352];
     snprintf(dst_conf, sizeof(dst_conf), "%s/custom.conf", dst_gdm);
+    if (kiba_copy_file(src_conf, dst_conf) != 0) {
+        return; /* best-effort, same as everything else in this function */
+    }
+
     kiba_gdm_disable_autologin(dst_conf);
 }
 
