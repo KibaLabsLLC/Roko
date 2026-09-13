@@ -30,6 +30,7 @@
 #include "kiba_udev.h"
 #include "kiba_install.h"
 
+#include <dirent.h>
 #include <fcntl.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -115,6 +116,211 @@ static void kiba_force_reread_partition_table(const char *disk) {
                                   * fails, kiba_wait_for_device() below
                                   * will time out and surface it */
     close(fd);
+}
+
+/* Copies a single regular file, preserving permission bits. Symlinks and
+ * anything else that isn't S_ISREG are the caller's problem (see
+ * kiba_copy_dir_recursive below, which special-cases symlinks itself so
+ * this never has to). Best-effort: returns -1 on any failure, but never
+ * calls fail()/exits -- GDM's config tree is not load-bearing for the
+ * install, just for how the freshly installed system happens to look on
+ * first boot. */
+static int kiba_copy_file(const char *src, const char *dst) {
+    struct stat st;
+    if (lstat(src, &st) != 0) return -1;
+
+    int in_fd = open(src, O_RDONLY);
+    if (in_fd < 0) return -1;
+
+    int out_fd = open(dst, O_WRONLY | O_CREAT | O_TRUNC, st.st_mode & 07777);
+    if (out_fd < 0) { close(in_fd); return -1; }
+
+    char buf[65536];
+    ssize_t n;
+    int ok = 1;
+    while ((n = read(in_fd, buf, sizeof(buf))) > 0) {
+        ssize_t off = 0;
+        while (off < n) {
+            ssize_t w = write(out_fd, buf + off, n - off);
+            if (w < 0) { ok = 0; break; }
+            off += w;
+        }
+        if (!ok) break;
+    }
+    if (n < 0) ok = 0;
+
+    close(in_fd);
+    close(out_fd);
+    return ok ? 0 : -1;
+}
+
+/* Recursively copies src_dir onto dst_dir (dst_dir is created if it
+ * doesn't exist). Regular files are copied byte-for-byte via
+ * kiba_copy_file(); symlinks are recreated as symlinks (readlink +
+ * symlink) rather than followed, since GDM's config tree can contain
+ * symlinks like custom.conf -> custom.conf.d snapshots and following
+ * them could pull in something unexpected from outside the tree;
+ * anything else (device nodes, sockets, fifos -- none of which belong
+ * in /etc/gdm) is silently skipped. Best-effort throughout: a failure
+ * on any one entry is logged-by-return-code-ignored by the caller and
+ * does not abort the copy of the rest of the tree, and does not fail()
+ * the install. */
+static void kiba_copy_dir_recursive(const char *src_dir, const char *dst_dir) {
+    struct stat dst_st;
+    if (stat(dst_dir, &dst_st) != 0) {
+        if (mkdir(dst_dir, 0755) != 0) return; /* can't create it, nothing more to do */
+    }
+
+    DIR *d = opendir(src_dir);
+    if (!d) return;
+
+    struct dirent *ent;
+    while ((ent = readdir(d)) != NULL) {
+        if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
+
+        char src_path[1024], dst_path[1024];
+        snprintf(src_path, sizeof(src_path), "%s/%s", src_dir, ent->d_name);
+        snprintf(dst_path, sizeof(dst_path), "%s/%s", dst_dir, ent->d_name);
+
+        struct stat st;
+        if (lstat(src_path, &st) != 0) continue;
+
+        if (S_ISDIR(st.st_mode)) {
+            kiba_copy_dir_recursive(src_path, dst_path);
+        } else if (S_ISLNK(st.st_mode)) {
+            char link_target[1024];
+            ssize_t len = readlink(src_path, link_target, sizeof(link_target) - 1);
+            if (len < 0) continue;
+            link_target[len] = '\0';
+            unlink(dst_path); /* ignore ENOENT -- just clearing the way for symlink() */
+            symlink(link_target, dst_path);
+        } else if (S_ISREG(st.st_mode)) {
+            kiba_copy_file(src_path, dst_path);
+        }
+        /* device nodes / sockets / fifos: skip, not expected under /etc/gdm */
+    }
+    closedir(d);
+}
+
+/* Strips the live session's autologin out of a copied custom.conf.
+ * The live ISO's GDM is configured (by the ISO build, not by anything
+ * in this backend) to auto-login as "liveuser" so the live session boots
+ * straight to a desktop with no login prompt -- exactly what you don't
+ * want on the installed system, where "liveuser" doesn't even exist as
+ * an account (kiba_install_create_user() above creates `username`, not
+ * "liveuser") and where a login prompt is the whole point.
+ *
+ * custom.conf is a small GLib keyfile (INI-style: "[section]" headers,
+ * "Key=Value" lines, "#"-prefixed comments). Rather than link against
+ * GLib's keyfile parser for two keys, this does a line-oriented rewrite:
+ * within the [daemon] section, any "AutomaticLoginEnable" line is
+ * rewritten to "AutomaticLoginEnable=false" (rather than deleted --
+ * GDM is happy with the key present-and-false, and leaving it in place
+ * documents that autologin was considered and deliberately turned off,
+ * instead of just silently absent) and any "AutomaticLogin" line
+ * (the username to log in as) is dropped entirely, since a stale
+ * "AutomaticLogin=liveuser" left behind next to
+ * "AutomaticLoginEnable=false" is dead config pointing at a user that
+ * no longer exists -- confusing for whoever reads this file later, and
+ * one accidental "=true" edit away from GDM trying to log into an
+ * account that isn't there. Whitespace-insensitive on both key and '='
+ * (GDM itself trims around '='), so "AutomaticLogin = liveuser" is
+ * matched too, not just the exact no-spaces form. Section tracking is
+ * simple by design: custom.conf only ever has [daemon]/[security]/
+ * [xdmcp]/[chooser]/[debug] as top-level sections with no nesting, so a
+ * single "currently inside [daemon]?" flag is sufficient -- no general
+ * INI-section stack needed. Best-effort and silent on any failure: a
+ * missing or unreadable custom.conf just means this is a no-op, which
+ * is fine since GDM defaults to no autologin when the key is absent
+ * anyway; a missing GDM install (a non-GNOME KibaOS variant with a
+ * different display manager) hits the same no-op path via
+ * kiba_gdm_copy_and_disable_autologin()'s stat() check below. */
+static void kiba_gdm_disable_autologin(const char *custom_conf_path) {
+    FILE *in = fopen(custom_conf_path, "r");
+    if (!in) return;
+
+    char tmp_path[1024];
+    snprintf(tmp_path, sizeof(tmp_path), "%s.kibaos-tmp", custom_conf_path);
+    FILE *out = fopen(tmp_path, "w");
+    if (!out) { fclose(in); return; }
+
+    char line[1024];
+    bool in_daemon_section = false;
+    while (fgets(line, sizeof(line), in)) {
+        /* Work on a trimmed copy for matching, but preserve/rewrite the
+         * real line (including its original line ending) for output. */
+        char trimmed[1024];
+        strncpy(trimmed, line, sizeof(trimmed) - 1);
+        trimmed[sizeof(trimmed) - 1] = '\0';
+
+        char *p = trimmed;
+        while (isspace((unsigned char)*p)) p++;
+        size_t tlen = strlen(p);
+        while (tlen > 0 && isspace((unsigned char)p[tlen - 1])) p[--tlen] = '\0';
+
+        if (p[0] == '[') {
+            in_daemon_section = (strcmp(p, "[daemon]") == 0);
+            fputs(line, out);
+            continue;
+        }
+
+        if (in_daemon_section) {
+            /* Split "Key = Value" / "Key=Value" on the first '=' and
+             * trim the key side for comparison. */
+            char *eq = strchr(p, '=');
+            if (eq) {
+                char key[128];
+                size_t klen = (size_t)(eq - p);
+                if (klen >= sizeof(key)) klen = sizeof(key) - 1;
+                memcpy(key, p, klen);
+                key[klen] = '\0';
+                size_t kt = strlen(key);
+                while (kt > 0 && isspace((unsigned char)key[kt - 1])) key[--kt] = '\0';
+
+                if (strcmp(key, "AutomaticLoginEnable") == 0) {
+                    fputs("AutomaticLoginEnable=false\n", out);
+                    continue;
+                }
+                if (strcmp(key, "AutomaticLogin") == 0) {
+                    continue; /* drop the line entirely */
+                }
+            }
+        }
+
+        fputs(line, out);
+    }
+
+    fclose(in);
+    fclose(out);
+    rename(tmp_path, custom_conf_path); /* atomic swap over the original */
+}
+
+/* Copies the live session's /etc/gdm tree onto the freshly installed
+ * root, then immediately strips the live-session autologin out of the
+ * copy -- so the installed system inherits the live ISO's GDM theming/
+ * settings (branding, any custom.conf.d overrides the ISO build ships)
+ * without inheriting the one setting ("boot straight into liveuser with
+ * no login prompt") that only makes sense on a live medium. Order
+ * matters: copy first, then edit the copy in place under target_root,
+ * never the live system's own /etc/gdm/custom.conf.
+ *
+ * Best-effort and non-fatal by design, same reasoning as the WinApps
+ * marker below: a KibaOS variant/spin without GDM (a non-GNOME session)
+ * simply has no /etc/gdm to copy, and that is a normal, expected case,
+ * not an install failure. */
+static void kiba_gdm_copy_and_disable_autologin(const char *target_root) {
+    struct stat st;
+    if (stat("/etc/gdm", &st) != 0 || !S_ISDIR(st.st_mode)) {
+        return; /* no GDM on this live medium/spin -- nothing to do */
+    }
+
+    char dst_gdm[320];
+    snprintf(dst_gdm, sizeof(dst_gdm), "%s/etc/gdm", target_root);
+    kiba_copy_dir_recursive("/etc/gdm", dst_gdm);
+
+    char dst_conf[352];
+    snprintf(dst_conf, sizeof(dst_conf), "%s/custom.conf", dst_gdm);
+    kiba_gdm_disable_autologin(dst_conf);
 }
 
 int main(int argc, char **argv) {
@@ -370,13 +576,23 @@ int main(int argc, char **argv) {
         fail(kiba_install_strerror());
     }
 
-    /* ── 10. Bootloader, services, initramfs ─────────────────────────── */
+    /* ── 10. Display manager configuration ───────────────────────────
+     * Carries the live session's /etc/gdm over onto the installed
+     * system, then strips out the live-only "auto-login as liveuser"
+     * setting -- see kiba_gdm_copy_and_disable_autologin()'s own
+     * comment for why this has to happen in that order (copy, then
+     * edit the copy) and why it's best-effort/non-fatal (no GDM on this
+     * spin is a normal case, not an install failure). */
+    progress(84, "Configuring display manager...");
+    kiba_gdm_copy_and_disable_autologin(target_root);
+
+    /* ── 11. Bootloader, services, initramfs ─────────────────────────── */
     if (kiba_install_finalize(target_root, disk, root_part, root_uuid, root_partno, dualboot,
                                progress_cb, NULL) != 0) {
         fail(kiba_install_strerror());
     }
 
-    /* ── 11. Windows app support ────────────────────────────────────────
+    /* ── 12. Windows app support ────────────────────────────────────────
      * Listed as a standing feature, not opt-in, so this always drops the
      * marker inside the freshly installed root -- the actual setup wizard
      * (kibaos-winapps-setup) only ever runs later, on first login into the
