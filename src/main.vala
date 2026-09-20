@@ -13,26 +13,20 @@ public struct OobeSummaryItem {
 public class KibaOOBE : Adw.Application {
     private Adw.ApplicationWindow window;
     private Adw.NavigationView    nav_view;
-    private string selected_disk   = "";
-    private string install_mode    = "erase"; // "erase" or "alongside" (dual boot)
-    private string selected_locale = "en_US.UTF-8";
-    private string selected_keymap = "us";
-    private string hostname_value  = "kibaos";
-    private string username_value  = "";
-    private string password_value  = "";
-    private bool   is_oem_mode     = false;
-    private const string OEM_MARKER = "/etc/kibaos/oem-pending";
+    private string selected_disk      = "";
+    private string install_mode       = "erase";
+    private string selected_locale    = "en_US.UTF-8";
+    private string selected_keymap    = "us";
+    private string hostname_value     = "kibaos";
+    private string username_value     = "";
+    private string password_value     = "";
+    private bool   is_oem_mode        = false;
+    private bool   telemetry_agreed   = false;
+    private const string OEM_MARKER   = "/etc/kibaos/oem-pending";
 
     // ── Language ──────────────────────────────────────────────────────
-    // Only affects the OOBE's own UI text. The locale picked on the
-    // Language & Keyboard page is a separate thing (that's what the
-    // installed system will use).
     private string ui_lang = "en";
 
-    // tiny inline translator — t("English", "Türkçe") right at each call
-    // site instead of a separate lookup table, so a string and its
-    // translation stay glued together in the source instead of drifting
-    // apart in two different files.
     private string t (string en, string tr, string pl) {
         return ui_lang == "tr" ? tr : ui_lang == "pl" ? pl : en;
     }
@@ -46,13 +40,6 @@ public class KibaOOBE : Adw.Application {
     }
 
     // ── VM detection ──────────────────────────────────────────────────
-    // No longer used to block installation (VDI/VMDK/qcow2 handling has
-    // been solid enough in practice that the original blanket refusal
-    // wasn't buying anything except friction for people testing/running
-    // KibaOS in a VM) -- still used below for OEM-mode detection, since
-    // a VM's virtual disk can spuriously look like "already on the
-    // computer" the same way a real OEM-preloaded disk does, and we
-    // don't want that misfiring in a test VM.
     private bool is_running_in_vm () {
         string out_str = "", err_str = "";
         int status = 0;
@@ -60,8 +47,6 @@ public class KibaOOBE : Adw.Application {
             GLib.Process.spawn_command_line_sync (
                 "systemd-detect-virt -q", out out_str, out err_str, out status);
         } catch (GLib.SpawnError e) { return false; }
-        // systemd-detect-virt exits 0 when it detects a VM/container,
-        // 1 when running on bare metal.
         return GLib.Process.if_exited (status) && GLib.Process.exit_status (status) == 0;
     }
 
@@ -108,19 +93,10 @@ public class KibaOOBE : Adw.Application {
                              : is_oem_mode ? "Finish Setting Up KibaOS" : "KibaOS Setup"
         };
         window.add_css_class ("kibaos-oobe-window");
-        // No decorations means no close button already, but Alt+F4/compositor
-        // shortcuts can still fire a close request -- OOBE isn't something
-        // you dismiss out from under yourself mid-install, same as Windows'
-        // setup flow never gives you a way out either. Block it outright.
         window.close_request.connect (() => { return true; });
-        // Belt-and-suspenders: if a compositor keybinding (or anything else)
-        // ever drops fullscreen out from under us, snap straight back into
-        // it instead of leaving OOBE sitting in a windowed state.
         window.notify["fullscreened"].connect (() => {
             if (!window.fullscreened) window.fullscreen ();
         });
-        // Default to light mode; the toggle on every page still lets the
-        // user switch to dark from there.
         Adw.StyleManager.get_default ().color_scheme = Adw.ColorScheme.FORCE_LIGHT;
         is_dark = false;
         apply_dark_mode ();
@@ -141,7 +117,6 @@ public class KibaOOBE : Adw.Application {
     private delegate void NextAction ();
 
     // ── Page chrome ────────────────────────────────────────────────────
-    // step_index / step_total drive the dot-indicator at the top of each card.
     private Adw.NavigationPage make_page (
             string title, Gtk.Widget content,
             string? next_label, NextAction? on_next,
@@ -149,11 +124,9 @@ public class KibaOOBE : Adw.Application {
             int  step_index  = 0,
             int  step_total  = 0) {
 
-        // Outer overlay = full-screen canvas
         var root = new Gtk.Overlay ();
         root.add_css_class ("oobe-background");
 
-        // Frosted card
         var card = new Gtk.Box (Gtk.Orientation.VERTICAL, 0) {
             halign = Gtk.Align.CENTER,
             valign = Gtk.Align.CENTER,
@@ -161,7 +134,6 @@ public class KibaOOBE : Adw.Application {
         };
         card.add_css_class ("oobe-card");
 
-        // ── Step-dots (shown when step_total > 1) ──────────────────────
         if (step_total > 1) {
             var dots_row = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 6) {
                 halign = Gtk.Align.CENTER,
@@ -185,19 +157,16 @@ public class KibaOOBE : Adw.Application {
             card.append (step_label);
         }
 
-        // Content + nav row wrapped in a box with padding
         var inner = new Gtk.Box (Gtk.Orientation.VERTICAL, 24);
         inner.add_css_class ("oobe-inner");
         inner.append (content);
 
-        // Nav row
         var nav_row = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 10) {
             halign = Gtk.Align.FILL,
             margin_top = 8
         };
         nav_row.add_css_class ("oobe-nav-row");
 
-        // Spacer
         var spacer = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 0) { hexpand = true };
         nav_row.append (spacer);
 
@@ -220,7 +189,6 @@ public class KibaOOBE : Adw.Application {
         card.append (inner);
         root.add_overlay (card);
 
-        // KibaOS wordmark top-left
         var brand = new Gtk.Label ("KibaOS") {
             halign = Gtk.Align.START,
             valign = Gtk.Align.START,
@@ -230,9 +198,15 @@ public class KibaOOBE : Adw.Application {
         brand.add_css_class ("oobe-brand");
         root.add_overlay (brand);
 
-        // Corner controls top-right: language toggle + dark-mode toggle.
-        // Live on every screen (not just Welcome) so switching either one
-        // doesn't force a trip back to page 1.
+        root.add_overlay (make_corner_controls ());
+
+        return new Adw.NavigationPage (root, title);
+    }
+
+    // ── Corner controls (language + dark-mode toggle) ──────────────────
+    // Extracted so both make_page and the hand-built telemetry consent
+    // page can call it without duplicating 25 lines.
+    private Gtk.Widget make_corner_controls () {
         var corner = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 8) {
             halign       = Gtk.Align.END,
             valign       = Gtk.Align.START,
@@ -243,9 +217,6 @@ public class KibaOOBE : Adw.Application {
         var lang_btn = new Gtk.Button.with_label (
             ui_lang == "en" ? "TR" : ui_lang == "tr" ? "PL" : "EN");
         lang_btn.add_css_class ("oobe-corner-button");
-        // Tooltip is always phrased in the CURRENT language, naming the NEXT
-        // one in the cycle (en -> tr -> pl -> en) -- matches the original
-        // en/tr behaviour, just extended to a third stop.
         lang_btn.tooltip_text = ui_lang == "en" ? "Switch to Turkish"
                                : ui_lang == "tr" ? "Lehçeye geç"
                                : "Przełącz na angielski";
@@ -268,14 +239,10 @@ public class KibaOOBE : Adw.Application {
         });
         corner.append (dark_btn);
 
-        root.add_overlay (corner);
-
-        return new Adw.NavigationPage (root, title);
+        return corner;
     }
 
-    // Rebuilds whatever page is currently on top of the nav stack, so a
-    // language/theme toggle is reflected immediately instead of only on
-    // the next forward/back navigation.
+    // ── Page refresh (language / theme toggle) ─────────────────────────
     private delegate Adw.NavigationPage PageBuilder ();
     private void refresh_current_page () {
         var stack = nav_view.get_navigation_stack ();
@@ -285,15 +252,14 @@ public class KibaOOBE : Adw.Application {
         string tag = current != null ? current.title : "";
         PageBuilder rebuild;
         switch (tag) {
-            case "Welcome":          rebuild = build_welcome_page; break;
-            case "Wi-Fi":            rebuild = build_wifi_page; break;
-            case "Language":         rebuild = build_locale_page; break;
-            case "Account":          rebuild = build_account_page; break;
-            case "Confirm":          rebuild = build_confirm_page; break;
-            case "Done":             rebuild = build_done_page; break;
-            default: return; // Storage / Install Mode / Installing carry
-                              // per-instance state that isn't worth
-                              // reconstructing from scratch mid-flow.
+            case "Welcome":   rebuild = build_welcome_page; break;
+            case "Wi-Fi":     rebuild = build_wifi_page; break;
+            case "Language":  rebuild = build_locale_page; break;
+            case "Account":   rebuild = build_account_page; break;
+            case "Telemetry": rebuild = build_telemetry_consent_page; break;
+            case "Confirm":   rebuild = build_confirm_page; break;
+            case "Done":      rebuild = build_done_page; break;
+            default: return;
         }
         nav_view.pop ();
         nav_view.push (rebuild ());
@@ -325,24 +291,15 @@ public class KibaOOBE : Adw.Application {
             halign = Gtk.Align.CENTER
         };
 
-        // Logo — centered above the greeting, Apple's own "Hello" screen
-        // skips a brand mark entirely and lets the greeting carry the
-        // whole moment, but KibaOS keeps a small centered one here since
-        // the persistent corner wordmark is easy to miss on a first boot.
         var logo = new Gtk.Image.from_file ("/usr/share/kibaos/installer-logo.png") {
             pixel_size = 64,
             halign     = Gtk.Align.CENTER
         };
         content.append (logo);
 
-        // The greeting itself -- plain system font, same treatment as
-        // every other page title. HIG is explicit that custom/script
-        // faces are for branding moments or "an immersive gaming
-        // experience," not a plain OS installer -- one typeface used
-        // consistently reads calmer and more native than a flourish here.
         var greeting = new Gtk.Label (
             t ("Welcome", "Hoş geldiniz", "Witamy")) {
-            halign = Gtk.Align.CENTER,
+            halign  = Gtk.Align.CENTER,
             justify = Gtk.Justification.CENTER
         };
         greeting.add_css_class ("oobe-welcome-greeting");
@@ -352,7 +309,7 @@ public class KibaOOBE : Adw.Application {
             t ("Let's get your system set up. This should only take a few minutes.",
                "Sisteminizi kuralım. Bu işlem yalnızca birkaç dakika sürecek.",
                "Skonfigurujmy Twój system. To zajmie tylko kilka minut.")) {
-            halign = Gtk.Align.CENTER,
+            halign  = Gtk.Align.CENTER,
             justify = Gtk.Justification.CENTER,
             margin_top = 4
         };
@@ -378,12 +335,11 @@ public class KibaOOBE : Adw.Application {
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // Page 2: Wi-Fi  (animated icon, network list, actual connection)
+    // Page 2: Wi-Fi
     // ══════════════════════════════════════════════════════════════════
     private Adw.NavigationPage build_wifi_page () {
         var content = new Gtk.Box (Gtk.Orientation.VERTICAL, 24);
 
-        // Animated Wi-Fi icon drawn on a DrawingArea
         var canvas = new Gtk.DrawingArea () {
             width_request  = 120,
             height_request = 120,
@@ -396,15 +352,15 @@ public class KibaOOBE : Adw.Application {
         uint[]   src_id = { 0 };
 
         canvas.set_draw_func ((da, cr, w, h) => {
-            double t      = tick[0];
+            double t2      = tick[0];
             double cx     = w / 2.0;
             double cy     = h / 2.0 + 8;
             double r1     = 14.0, r2 = 26.0, r3 = 38.0;
             double sw     = 4.5;
 
-            double a3 = double.max (0, double.min (1, t * 3));
-            double a2 = double.max (0, double.min (1, t * 3 - 0.6));
-            double a1 = double.max (0, double.min (1, t * 3 - 1.2));
+            double a3 = double.max (0, double.min (1, t2 * 3));
+            double a2 = double.max (0, double.min (1, t2 * 3 - 0.6));
+            double a1 = double.max (0, double.min (1, t2 * 3 - 1.2));
 
             cr.set_line_width (sw);
             cr.set_line_cap (Cairo.LineCap.ROUND);
@@ -423,7 +379,7 @@ public class KibaOOBE : Adw.Application {
             cr.arc (cx, cy, r1, start_angle, end_angle);
             cr.stroke ();
 
-            double dp    = (t * 1.4) % 1.0;
+            double dp    = (t2 * 1.4) % 1.0;
             double rip_r = 6.0 + dp * 18.0;
             double rip_a = (1.0 - dp) * 0.55;
 
@@ -455,20 +411,12 @@ public class KibaOOBE : Adw.Application {
                "Devam etmek için bir ağ seçin. Bu adımı atlayabilirsiniz de.",
                "Wybierz sieć, aby kontynuować. Możesz też pominąć ten krok.")));
 
-        // Status label shown below the list ("Connecting…", "Connected ✓", errors)
         var status_label = new Gtk.Label ("") {
             halign = Gtk.Align.CENTER,
             wrap   = true
         };
         status_label.add_css_class ("oobe-subtitle");
 
-        // Network is now required (codec install during finalize needs it,
-        // and skipping used to leave people on a system with no way to
-        // reach the mirrors afterward either). Next just refuses to
-        // navigate until this is true -- either flipped by
-        // do_connect_async below, or here already if wired/some other
-        // connection is already up (don't force a Wi-Fi-specific flow on
-        // someone plugged into Ethernet).
         bool[] connected_box = { false };
         try {
             string state_out = "";
@@ -480,7 +428,6 @@ public class KibaOOBE : Adw.Application {
             }
         } catch (GLib.SpawnError e) {}
 
-        // ── Discover the first NetworkManager-managed wireless device ─────
         string wifi_dev = "";
         try {
             string dev_out = "";
@@ -494,42 +441,16 @@ public class KibaOOBE : Adw.Application {
             }
         } catch (GLib.SpawnError e) {}
 
-        // Capture for closures
         string[] dev_box = { wifi_dev };
 
-        // ── Build network list ────────────────────────────────────────────
         var list_box = new Gtk.ListBox ();
         list_box.add_css_class ("oobe-list");
         list_box.selection_mode = Gtk.SelectionMode.SINGLE;
 
-        // Each row stores its SSID and whether it needs a password in widget data.
-        // We use a simple parallel arrays approach since Vala/GTK4 has no
-        // set_data on widgets without GObject subclassing tricks. Boxed
-        // (double-array) so refresh_networks() below can reassign the
-        // contents and have row_activated's closure (created once, further
-        // down) see the updated values on every rescan -- reassigning a
-        // plain unboxed local wouldn't be visible from a closure created
-        // before the reassignment.
-        // NOTE: `string[][] x = { {} };` is NOT valid Vala -- "stacked
-        // array" literals like that aren't supported by the compiler
-        // (confirmed: valac 0.56.19 rejects it outright). Gee.ArrayList
-        // gives the same "closures see later mutations" property since
-        // it's a reference type -- refresh_networks() below just
-        // clear()/add()s into the same list object instead of reassigning
-        // a boxed array slot.
         var ssid_box    = new Gee.ArrayList<string> ();
         var secured_box = new Gee.ArrayList<bool> ();
-
-        // Set while a password dialog is open or a connection attempt is
-        // in flight, so the periodic rescan below doesn't yank the row
-        // list out from under someone mid-pick or mid-typing.
         bool[] scan_paused_box = { false };
 
-        // Pulled out into its own function so the periodic timer further
-        // down can just call this again instead of duplicating the whole
-        // scan-and-render pass. Safe to call repeatedly: it fully rebuilds
-        // list_box's rows and ssid_box/secured_box each time rather than
-        // diffing, which is fine at Wi-Fi-scan-list sizes.
         void refresh_networks () {
             if (scan_paused_box[0]) return;
 
@@ -539,17 +460,12 @@ public class KibaOOBE : Adw.Application {
                     string scan_out = "";
                     GLib.Process.spawn_command_line_sync (
                         "nmcli device wifi rescan ifname %s".printf (dev_box[0]), out scan_out);
-                    // Colon-separated, one AP per line: SSID:SECURITY:SIGNAL
-                    // (nmcli backslash-escapes literal colons inside the SSID field).
                     GLib.Process.spawn_command_line_sync (
                         "nmcli -t -f SSID,SECURITY,SIGNAL device wifi list ifname %s".printf (dev_box[0]),
                         out raw_nets);
                 } catch (GLib.SpawnError e) {}
             }
 
-            // Clear whatever's there from the previous pass before
-            // repopulating -- including the "No networks found" placeholder
-            // row, if that's what's currently shown.
             Gtk.Widget? child = list_box.get_first_child ();
             while (child != null) {
                 var next = child.get_next_sibling ();
@@ -564,8 +480,6 @@ public class KibaOOBE : Adw.Application {
             foreach (var line in raw_nets.split ("\n")) {
                 var trimmed = line.strip ();
                 if (trimmed == "") continue;
-                // Split on unescaped colons only (nmcli escapes literal ':' in
-                // field values as '\:').
                 var cols = GLib.Regex.split_simple ("(?<!\\\\):", trimmed);
                 if (cols.length < 3) continue;
                 string ssid = cols[0].replace ("\\:", ":").strip ();
@@ -577,8 +491,6 @@ public class KibaOOBE : Adw.Application {
                 int    pct         = int.parse (signal_str);
                 string signal_pct  = "%d%%".printf (int.max (0, int.min (100, pct)));
 
-                // Choose a text signal-bar glyph based on nmcli's 0-100 signal
-                // percentage, instead of an icon-theme lookup.
                 string signal_bars;
                 if      (pct >= 80) signal_bars = "▂▄▆█";
                 else if (pct >= 55) signal_bars = "▂▄▆";
@@ -586,13 +498,13 @@ public class KibaOOBE : Adw.Application {
                 else                signal_bars = "▂";
 
                 var row = new Adw.ActionRow () {
-                    title         = ssid,
-                    subtitle      = "%s\n%s".printf (signal_pct,
+                    title          = ssid,
+                    subtitle       = "%s\n%s".printf (signal_pct,
                                         secured
                                             ? t ("Secured", "Güvenli", "Zabezpieczona")
                                             : t ("Open", "Açık", "Otwarta")),
                     subtitle_lines = 2,
-                    activatable   = true
+                    activatable    = true
                 };
                 row.add_prefix (new Gtk.Label (signal_bars) { css_classes = { "oobe-signal-glyph" } });
                 list_box.append (row);
@@ -611,16 +523,10 @@ public class KibaOOBE : Adw.Application {
 
         refresh_networks ();
 
-        // Capped height + internal scrolling: an unbounded list_box grows
-        // the whole card taller than the screen once enough networks are
-        // in range, pushing the Next/Back row below the visible area with
-        // no way to reach it. Scrolling inside a fixed-height pane keeps
-        // the nav row anchored in place regardless of how many networks
-        // show up.
         var list_scroller = new Gtk.ScrolledWindow () {
-            hscrollbar_policy   = Gtk.PolicyType.NEVER,
-            vscrollbar_policy   = Gtk.PolicyType.AUTOMATIC,
-            max_content_height  = 280,
+            hscrollbar_policy        = Gtk.PolicyType.NEVER,
+            vscrollbar_policy        = Gtk.PolicyType.AUTOMATIC,
+            max_content_height       = 280,
             propagate_natural_height = true
         };
         list_scroller.set_child (list_box);
@@ -628,11 +534,6 @@ public class KibaOOBE : Adw.Application {
         content.append (list_scroller);
         content.append (status_label);
 
-        // Periodic rescan so networks that come into/out of range while
-        // this page is up actually show up, instead of only ever
-        // reflecting a single scan taken the instant the page was built.
-        // Torn down via list_box.destroy so it stops firing (and touching
-        // a dead widget) once the user navigates past this page.
         uint[] refresh_timer_box = { 0 };
         refresh_timer_box[0] = GLib.Timeout.add_seconds (5, () => {
             refresh_networks ();
@@ -645,9 +546,6 @@ public class KibaOOBE : Adw.Application {
             }
         });
 
-        // ── Row activation: password dialog → nmcli connect ──────────────
-        // Captures: dev_box, ssid_box, secured_box, status_label, window,
-        // scan_paused_box
         list_box.row_activated.connect ((row) => {
             int idx = row.get_index ();
             if (idx < 0 || idx >= ssid_box.size) return;
@@ -656,35 +554,28 @@ public class KibaOOBE : Adw.Application {
             bool   secured = secured_box[idx];
 
             if (secured) {
-                // ── Password dialog ───────────────────────────────────────
-                // Pause the 5s rescan for as long as this dialog (or the
-                // resulting connect attempt) is live -- a scan mid-typing
-                // would rebuild list_box's rows out from under the user.
                 scan_paused_box[0] = true;
 
                 var dialog = new Adw.MessageDialog (window,
                     t ("Enter Wi-Fi Password", "Wi-Fi Şifresini Girin", "Wprowadź hasło Wi-Fi"),
                     t ("""Enter the password for "%s".""",
                        """"%s" ağının şifresini girin.""",
-                       "Wprowadź hasło dla „%s”.").printf (ssid));
+                       "Wprowadź hasło dla „%s".").printf (ssid));
 
                 var pw_entry = new Gtk.PasswordEntry () {
-                    show_peek_icon = true,
-                    placeholder_text = t ("Password", "Şifre", "Hasło")
+                    show_peek_icon    = true,
+                    placeholder_text  = t ("Password", "Şifre", "Hasło")
                 };
                 pw_entry.add_css_class ("oobe-entry");
                 dialog.set_extra_child (pw_entry);
 
-                dialog.add_response ("cancel", t ("Cancel", "İptal", "Anuluj"));
+                dialog.add_response ("cancel",  t ("Cancel",  "İptal",  "Anuluj"));
                 dialog.add_response ("connect", t ("Connect", "Bağlan", "Połącz"));
                 dialog.set_response_appearance ("connect", Adw.ResponseAppearance.SUGGESTED);
                 dialog.set_default_response ("connect");
                 dialog.set_close_response ("cancel");
 
-                // Allow pressing Enter in the password field to confirm
-                pw_entry.activate.connect (() => {
-                    dialog.response ("connect");
-                });
+                pw_entry.activate.connect (() => { dialog.response ("connect"); });
 
                 dialog.response.connect ((resp) => {
                     if (resp != "connect") { dialog.destroy (); scan_paused_box[0] = false; return; }
@@ -710,7 +601,6 @@ public class KibaOOBE : Adw.Application {
                 dialog.present ();
 
             } else {
-                // ── Open network — connect directly ───────────────────────
                 scan_paused_box[0] = true;
                 status_label.label = t ("Connecting to %s…", "%s ağına bağlanıyor…", "Łączenie z %s…").printf (ssid);
                 do_connect_async (dev_box[0], ssid, null, status_label, connected_box);
@@ -721,25 +611,21 @@ public class KibaOOBE : Adw.Application {
             if (!connected_box[0]) {
                 status_label.remove_css_class ("oobe-subtitle");
                 status_label.add_css_class ("oobe-error");
-                status_label.label = t ("Connect to a network to continue -- KibaOS needs it to fetch media codecs during install.",
-                                         "Devam etmek için bir ağa bağlanın -- KibaOS, kurulum sırasında medya kodeklerini almak için buna ihtiyaç duyar.",
-                                         "Połącz się z siecią, aby kontynuować -- KibaOS potrzebuje jej do pobrania kodeków multimedialnych podczas instalacji.");
+                status_label.label = t (
+                    "Connect to a network to continue — KibaOS needs it to fetch media codecs during install.",
+                    "Devam etmek için bir ağa bağlanın — KibaOS, kurulum sırasında medya kodeklerini almak için buna ihtiyaç duyar.",
+                    "Połącz się z siecią, aby kontynuować — KibaOS potrzebuje jej do pobrania kodeków multimedialnych podczas instalacji.");
                 return;
             }
             nav_view.push (build_locale_page ());
-        }, false, 1, 6);
+        }, false, 0, 7);
     }
 
-    // ── Async connect helper ─────────────────────────────────────────────────
-    // Runs `nmcli device wifi connect <ssid> [password <pw>] ifname <dev>` in
-    // a background GLib.Thread so the GTK main loop stays responsive, then
-    // polls `nmcli device show <dev>` on the main thread for up to 15 s to
-    // confirm association. Updates status_label on each step.
+    // ── Async connect helper ──────────────────────────────────────────────
     private void do_connect_async (string dev, string ssid,
                                     string? password,
                                     Gtk.Label status_label,
                                     bool[] connected_box) {
-        // Build argv — no shell, no quoting/injection surface
         string[] argv_arr;
         if (password != null) {
             argv_arr = { "nmcli", "device", "wifi", "connect", ssid,
@@ -749,8 +635,6 @@ public class KibaOOBE : Adw.Application {
                          "ifname", dev };
         }
 
-        // Kick the blocking nmcli call off the main thread.
-        // When it finishes, schedule the polling phase back on the main loop.
         string[]  argv_copy   = argv_arr;
         string    dev_copy    = dev;
         string    ssid_copy   = ssid;
@@ -773,7 +657,6 @@ public class KibaOOBE : Adw.Application {
                 err = e.message;
             }
 
-            // Marshal result back to the GTK main thread
             bool   ok_f  = ok;
             string err_f = err;
             GLib.Idle.add (() => {
@@ -783,7 +666,6 @@ public class KibaOOBE : Adw.Application {
                     lbl.label = t ("Could not connect: %s", "Bağlanılamadı: %s", "Nie udało się połączyć: %s").printf (err_f);
                     return GLib.Source.REMOVE;
                 }
-                // Start polling for association on the main thread
                 lbl.remove_css_class ("oobe-error");
                 lbl.add_css_class ("oobe-subtitle");
                 lbl.label = t ("Verifying connection…", "Bağlantı doğrulanıyor…", "Weryfikowanie połączenia…");
@@ -804,7 +686,7 @@ public class KibaOOBE : Adw.Application {
                         connected_box[0] = true;
                         return GLib.Source.REMOVE;
                     }
-                    if (attempts[0] >= 30) {   // 30 × 500 ms = 15 s
+                    if (attempts[0] >= 30) {
                         lbl.remove_css_class ("oobe-subtitle");
                         lbl.add_css_class ("oobe-error");
                         lbl.label = t ("Timed out — check the password and try again.",
@@ -832,8 +714,6 @@ public class KibaOOBE : Adw.Application {
 
         var locale_row = new Adw.ComboRow () { title = t ("Language", "Dil", "Język") };
         var locale_model = new Gtk.StringList (null);
-        // Display names shown in the picker; `locales` holds the actual
-        // locale strings the installed system will use, in the same order.
         string[] locale_labels = {
             "English (US)", "English (UK)", "Deutsch", "Français",
             "Español", "日本語", "中文（简体）", "Türkçe", "Polski"
@@ -867,7 +747,7 @@ public class KibaOOBE : Adw.Application {
         return make_page ("Language", content, t ("Next", "İleri", "Dalej"), () => {
             if (is_oem_mode) nav_view.push (build_account_page ());
             else advance_past_storage_step ();
-        }, false, 2, 6);
+        }, false, 1, 7);
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -881,9 +761,6 @@ public class KibaOOBE : Adw.Application {
         return strip_partition_suffix (GLib.Path.get_basename (s.strip ()));
     }
 
-    // True if `devpath` already has a partition table with at least one
-    // partition on it — our signal that there might be another OS here,
-    // worth asking the user whether to erase it or install alongside it.
     private bool disk_has_existing_data (string devpath) {
         string raw = "";
         try { GLib.Process.spawn_command_line_sync (
@@ -893,8 +770,6 @@ public class KibaOOBE : Adw.Application {
         foreach (var line in raw.split ("\n")) {
             if (line.strip () != "") lines++;
         }
-        // First line is the disk itself; anything beyond that means at
-        // least one partition already exists.
         return lines > 1;
     }
 
@@ -919,19 +794,6 @@ public class KibaOOBE : Adw.Application {
             string rest    = parts.length > 1 ? parts[1].strip () : "";
             if (rest.has_suffix (" 1") || rest == "1") continue;
             if (GLib.Path.get_basename (devpath) == boot_dev) continue;
-            // eMMC storage (common on Chromebooks, e.g. mmcblk1) exposes its
-            // two hardware boot partitions and the RPMB partition as their
-            // OWN top-level block devices -- /dev/mmcblk1boot0,
-            // /dev/mmcblk1boot1, /dev/mmcblk1rpmb -- sitting next to
-            // /dev/mmcblk1 in /sys/block, not nested under it. `lsblk -d`
-            // lists all of them as if they were independent disks, and
-            // -e7,11 (loop, sr) doesn't touch them. They're tiny (4MB),
-            // hardware write-protected (force_ro) by default, and never a
-            // valid install target -- offering one lets GPT/mkfs silently
-            // fail against a read-only device, which then extracts into
-            // nothing and leaves arch-chroot pointed at an empty rootfs
-            // downstream. Filter by the fixed mmcblkNbootN/rpmb naming
-            // pattern rather than trying to detect force_ro generically.
             try {
                 if (/mmcblk[0-9]+(boot[01]|rpmb)$/.match (devpath)) continue;
             } catch (GLib.RegexError e) {}
@@ -957,9 +819,6 @@ public class KibaOOBE : Adw.Application {
         }
     }
 
-    // After a disk is settled on: if it looks like it already has an OS
-    // on it, ask erase-vs-alongside; otherwise there's nothing to ask
-    // (a blank disk can only be erased/initialized) so skip straight on.
     private void advance_past_install_mode_step () {
         install_mode = "erase";
         if (selected_disk != "" && disk_has_existing_data (selected_disk)) {
@@ -1000,12 +859,11 @@ public class KibaOOBE : Adw.Application {
 
         return make_page ("Storage", content, t ("Next", "İleri", "Dalej"), () => {
             advance_past_install_mode_step ();
-        }, false, 3, 6);
+        }, false, 2, 7);
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // Page 4b: Install mode (erase vs. install alongside) — only shown
-    // when the chosen drive already has an existing OS/partition table
+    // Page 4b: Install mode (only shown when drive has existing data)
     // ══════════════════════════════════════════════════════════════════
     private Adw.NavigationPage build_install_mode_page () {
         var content = new Gtk.Box (Gtk.Orientation.VERTICAL, 20);
@@ -1046,7 +904,7 @@ public class KibaOOBE : Adw.Application {
 
         return make_page ("Install Mode", content, t ("Next", "İleri", "Dalej"), () => {
             nav_view.push (build_account_page ());
-        }, false, 3, 6);
+        }, false, 2, 7);
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -1062,10 +920,6 @@ public class KibaOOBE : Adw.Application {
 
         var group = new Adw.PreferencesGroup ();
         group.add_css_class ("oobe-prefs-group");
-        // "overflow: hidden" in oobe.css doesn't do anything -- GTK4's CSS
-        // engine doesn't have that property, confirmed by the theme parser
-        // warning it throws on startup. Clipping child rows to the
-        // rounded-corner container is a widget property, not CSS.
         group.overflow = Gtk.Overflow.HIDDEN;
 
         var hostname_entry = new Adw.EntryRow () { title = t ("Computer name", "Bilgisayar adı", "Nazwa komputera") };
@@ -1083,23 +937,269 @@ public class KibaOOBE : Adw.Application {
 
         content.append (group);
 
-        // No WinApps toggle here -- it's a listed, always-on feature (see
-        // WINDOWS APP SUPPORT section), not opt-in. Both backends always
-        // drop /etc/kibaos/winapps-pending unconditionally on finish.
-
-        return make_page ("Account", content,
-            is_oem_mode ? t ("Finish Setup", "Kurulumu Bitir", "Zakończ konfigurację") : t ("Next", "İleri", "Dalej"), () => {
-                if (is_oem_mode) {
-                    nav_view.push (build_installing_page ());
-                    start_oem_finish ();
-                } else {
-                    nav_view.push (build_confirm_page ());
-                }
-            }, false, 4, 6);
+        // Both OEM and normal flows go through the consent page next.
+        // OEM used to jump straight to installing here; the consent page
+        // now handles the OEM fork itself once the user makes their choice.
+        return make_page ("Account", content, t ("Next", "İleri", "Dalej"), () => {
+            nav_view.push (build_telemetry_consent_page ());
+        }, false, 3, 7);
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // Page 6: Confirm
+    // Page 6: Telemetry consent
+    //
+    // Built with custom chrome (not make_page) so we can hold the Share
+    // and Don't Share buttons insensitive until the user has scrolled the
+    // full disclosure. make_page builds its Next button internally with no
+    // way to hand back a reference for sensitivity control, so this page
+    // owns its card layout directly and calls make_corner_controls() for
+    // the shared top-right overlay.
+    // ══════════════════════════════════════════════════════════════════
+    private Adw.NavigationPage build_telemetry_consent_page () {
+        bool[] scrolled_box = { false };
+
+        // ── Root overlay + frosted card ───────────────────────────────
+        var root = new Gtk.Overlay ();
+        root.add_css_class ("oobe-background");
+
+        var card = new Gtk.Box (Gtk.Orientation.VERTICAL, 0) {
+            halign        = Gtk.Align.CENTER,
+            valign        = Gtk.Align.CENTER,
+            width_request = 640
+        };
+        card.add_css_class ("oobe-card");
+
+        // Step dots: step 5 of 7 (0-based index 4)
+        var dots_row = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 6) {
+            halign        = Gtk.Align.CENTER,
+            margin_bottom = 10
+        };
+        for (int i = 0; i < 7; i++) {
+            var dot = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 0) {};
+            dot.add_css_class ("oobe-step-dot");
+            if (i == 4) dot.add_css_class ("oobe-step-dot-active");
+            dots_row.append (dot);
+        }
+        card.append (dots_row);
+
+        var step_label = new Gtk.Label (
+            t ("Step 5 of 7", "Adım 5 / 7", "Krok 5 z 7")) {
+            halign        = Gtk.Align.CENTER,
+            margin_bottom = 16
+        };
+        step_label.add_css_class ("oobe-step-label");
+        card.append (step_label);
+
+        var inner = new Gtk.Box (Gtk.Orientation.VERTICAL, 24);
+        inner.add_css_class ("oobe-inner");
+
+        inner.append (oobe_heading (
+            t ("Help Improve KibaOS",
+               "KibaOS'u Geliştirmeye Yardım Edin",
+               "Pomóż ulepszać KibaOS"),
+            t ("Read the information below, then choose whether to share hardware data with Kiba Labs.",
+               "Aşağıdaki bilgileri okuyun, ardından donanım verilerini Kiba Labs ile paylaşıp paylaşmayacağınızı seçin.",
+               "Przeczytaj poniższe informacje, a następnie zdecyduj, czy chcesz udostępniać dane sprzętowe firmie Kiba Labs.")));
+
+        // ── Consent disclosure text ───────────────────────────────────
+        string consent_text = t (
+"""KibaOS can share anonymous hardware information with Kiba Labs once every 6 hours. This helps us understand what hardware our users trust, so we can improve device compatibility and publish research reports.
+
+What gets collected — from this machine only:
+  • CPU model (e.g. "Intel Core i7-12700K")
+  • GPU model(s) (e.g. "NVIDIA GeForce RTX 4070")
+  • Motherboard vendor and model
+  • USB and PCI peripheral names (brand and product only — no serial numbers)
+
+What is never collected:
+  • Your name, username, location, or account details
+  • Files, clipboard contents, or anything you type
+  • Browsing history or network traffic
+  • Other devices on your network — only this machine
+  • Any identifier that follows your machine between reporting periods
+
+Before anything leaves this machine, it's aggregated locally and assigned a rotating anonymous ID that resets every reporting period. The same machine cannot be correlated across periods. You can inspect every payload that has ever left this machine at:
+
+    /var/log/kibad/telemetry-outbound.log
+
+Kiba Labs uses this data to publish aggregate hardware-compatibility research and to improve device support in future KibaOS releases. We do not sell data in a form that could identify you or your machine.
+
+Choosing "Don't Share" does not affect any KibaOS feature. You can change this choice later in Switchboard → Privacy.""",
+"""KibaOS, Kiba Labs ile her 6 saatte bir anonim donanım bilgisi paylaşabilir. Bu bilgiler, kullanıcılarımızın hangi donanıma güvendiğini anlamamıza ve cihaz uyumluluğunu iyileştirmemize yardımcı olur.
+
+Yalnızca bu makineden toplananlar:
+  • İşlemci modeli (örn. "Intel Core i7-12700K")
+  • Grafik işlemci modeli/modelleri (örn. "NVIDIA GeForce RTX 4070")
+  • Anakart üreticisi ve modeli
+  • USB ve PCI çevre birimi adları (yalnızca marka ve ürün — seri numarası yok)
+
+Asla toplanmayanlar:
+  • Adınız, kullanıcı adınız, konumunuz veya hesap bilgileriniz
+  • Dosyalar, pano içerikleri veya yazdıklarınız
+  • Tarama geçmişi veya ağ trafiği
+  • Ağınızdaki diğer cihazlar — yalnızca bu makine
+  • Raporlama dönemleri arasında makinenizi takip eden herhangi bir tanımlayıcı
+
+Bu makineden herhangi bir şey ayrılmadan önce veriler yerel olarak toplanır ve her raporlama döneminde sıfırlanan dönen bir anonim kimlik atanır. Gönderilen her paketi şu adreste inceleyebilirsiniz:
+
+    /var/log/kibad/telemetry-outbound.log
+
+Kiba Labs bu verileri toplu donanım uyumluluk araştırması yayınlamak ve gelecekteki KibaOS sürümlerinde cihaz desteğini iyileştirmek için kullanır.
+
+"Paylaşma" seçeneği hiçbir KibaOS özelliğini etkilemez. Bu seçimi daha sonra Switchboard → Gizlilik bölümünden değiştirebilirsiniz.""",
+"""KibaOS może raz na 6 godzin udostępniać anonimowe informacje o sprzęcie firmie Kiba Labs. Pomaga nam to zrozumieć, jakiego sprzętu używają nasi użytkownicy, i poprawiać kompatybilność urządzeń.
+
+Co jest zbierane — tylko z tego komputera:
+  • Model procesora (np. "Intel Core i7-12700K")
+  • Model(e) karty graficznej (np. "NVIDIA GeForce RTX 4070")
+  • Producent i model płyty głównej
+  • Nazwy urządzeń peryferyjnych USB i PCI (tylko marka i produkt — bez numerów seryjnych)
+
+Czego nigdy nie zbieramy:
+  • Twojego imienia, nazwy użytkownika, lokalizacji ani danych konta
+  • Plików, zawartości schowka ani tego, co piszesz
+  • Historii przeglądania ani ruchu sieciowego
+  • Innych urządzeń w sieci — tylko ten komputer
+  • Żadnego identyfikatora śledzącego Twój komputer między okresami raportowania
+
+Przed wysłaniem jakichkolwiek danych są one agregowane lokalnie i przypisywany jest im rotacyjny anonimowy identyfikator, resetowany co okres raportowania. Możesz przejrzeć każdy wysłany pakiet w:
+
+    /var/log/kibad/telemetry-outbound.log
+
+Kiba Labs używa tych danych do publikowania zbiorczych raportów o kompatybilności sprzętu i poprawy obsługi urządzeń w przyszłych wersjach KibaOS.
+
+Wybranie „Nie udostępniaj" nie wpływa na żadną funkcję KibaOS. Możesz zmienić tę opcję później w Switchboard → Prywatność.""");
+
+        var consent_label = new Gtk.Label (consent_text) {
+            wrap          = true,
+            xalign        = 0.0f,
+            margin_start  = 2,
+            margin_end    = 2,
+            margin_top    = 2,
+            margin_bottom = 2
+        };
+        consent_label.add_css_class ("oobe-subtitle");
+
+        var scroller = new Gtk.ScrolledWindow () {
+            hscrollbar_policy        = Gtk.PolicyType.NEVER,
+            vscrollbar_policy        = Gtk.PolicyType.AUTOMATIC,
+            min_content_height       = 200,
+            max_content_height       = 240,
+            propagate_natural_height = false
+        };
+        scroller.set_child (consent_label);
+        inner.append (scroller);
+
+        // Nudge shown until the user reaches the bottom
+        var scroll_hint = new Gtk.Label (
+            t ("↓  Scroll down to unlock the buttons below",
+               "↓  Devam etmek için aşağı kaydırın",
+               "↓  Przewiń w dół, aby odblokować przyciski")) {
+            halign = Gtk.Align.CENTER
+        };
+        scroll_hint.add_css_class ("oobe-subtitle");
+        inner.append (scroll_hint);
+
+        // ── Nav row with scroll-gated buttons ────────────────────────
+        var nav_row = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 10) {
+            halign     = Gtk.Align.FILL,
+            margin_top = 8
+        };
+        nav_row.add_css_class ("oobe-nav-row");
+
+        var spacer = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 0) { hexpand = true };
+        nav_row.append (spacer);
+
+        var back_btn = new Gtk.Button.with_label (t ("Back", "Geri", "Wstecz"));
+        back_btn.add_css_class ("oobe-secondary-button");
+        back_btn.clicked.connect (() => nav_view.pop ());
+        nav_row.append (back_btn);
+
+        var decline_btn = new Gtk.Button.with_label (t ("Don't Share", "Paylaşma", "Nie udostępniaj"));
+        decline_btn.add_css_class ("oobe-secondary-button");
+        decline_btn.sensitive = false;
+        nav_row.append (decline_btn);
+
+        var share_btn = new Gtk.Button.with_label (t ("Share Hardware Data", "Donanım Verilerini Paylaş", "Udostępnij dane sprzętowe"));
+        share_btn.add_css_class ("oobe-primary-button");
+        share_btn.sensitive = false;
+        nav_row.append (share_btn);
+
+        inner.append (nav_row);
+        card.append (inner);
+
+        // ── Scroll gate ───────────────────────────────────────────────
+        // Unlock both buttons once the user has seen the bottom of the
+        // disclosure. Two paths: value-changed fires on every scroll step;
+        // the map handler catches the case where the text is short enough
+        // to fit without scrolling (small display, large font, etc.).
+        var vadj = scroller.vadjustment;
+
+        vadj.value_changed.connect (() => {
+            if (scrolled_box[0]) return;
+            if (vadj.value + vadj.page_size >= vadj.upper - 2.0) {
+                scrolled_box[0]       = true;
+                decline_btn.sensitive = true;
+                share_btn.sensitive   = true;
+                scroll_hint.label     = "";
+            }
+        });
+
+        scroller.map.connect (() => {
+            // Run after the layout pass so page_size/upper are populated.
+            GLib.Idle.add (() => {
+                if (!scrolled_box[0] &&
+                    (vadj.upper <= vadj.lower + 1.0 ||
+                     vadj.upper - vadj.lower <= vadj.page_size + 2.0)) {
+                    scrolled_box[0]       = true;
+                    decline_btn.sensitive = true;
+                    share_btn.sensitive   = true;
+                    scroll_hint.label     = "";
+                }
+                return GLib.Source.REMOVE;
+            });
+        });
+
+        // ── Button actions ────────────────────────────────────────────
+        decline_btn.clicked.connect (() => {
+            telemetry_agreed = false;
+            if (is_oem_mode) {
+                nav_view.push (build_installing_page ());
+                start_oem_finish ();
+            } else {
+                nav_view.push (build_confirm_page ());
+            }
+        });
+
+        share_btn.clicked.connect (() => {
+            telemetry_agreed = true;
+            if (is_oem_mode) {
+                nav_view.push (build_installing_page ());
+                start_oem_finish ();
+            } else {
+                nav_view.push (build_confirm_page ());
+            }
+        });
+
+        // ── Card chrome ───────────────────────────────────────────────
+        root.add_overlay (card);
+
+        var brand = new Gtk.Label ("KibaOS") {
+            halign       = Gtk.Align.START,
+            valign       = Gtk.Align.START,
+            margin_start = 36,
+            margin_top   = 32
+        };
+        brand.add_css_class ("oobe-brand");
+        root.add_overlay (brand);
+
+        root.add_overlay (make_corner_controls ());
+
+        return new Adw.NavigationPage (root, "Telemetry");
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // Page 7: Confirm
     // ══════════════════════════════════════════════════════════════════
     private Adw.NavigationPage build_confirm_page () {
         var content = new Gtk.Box (Gtk.Orientation.VERTICAL, 20);
@@ -1110,14 +1210,15 @@ public class KibaOOBE : Adw.Application {
                      "using the free space on this drive. Nothing else will be touched.",
                      "KibaOS, mevcut işletim sisteminizin yanına, bu diskteki boş alan " +
                      "kullanılarak kurulacak. Başka hiçbir şeye dokunulmayacak.",
-                     "KibaOS zostanie zainstalowany obok Twojego obecnego systemu operacyjnego, wykorzystując wolne miejsce na tym dysku. Nic innego nie zostanie zmienione.")
+                     "KibaOS zostanie zainstalowany obok Twojego obecnego systemu operacyjnego, " +
+                     "wykorzystując wolne miejsce na tym dysku. Nic innego nie zostanie zmienione.")
                 : t ("Everything on your computer will be replaced. " +
                      "Make sure anything important is backed up first.",
                      "Bilgisayarınızdaki her şeyin yerine yenisi kurulacak. " +
                      "Önemli olan her şeyi önceden yedeklediğinizden emin olun.",
-                     "Wszystko na Twoim komputerze zostanie zastąpione. Upewnij się wcześniej, że wszystkie ważne dane masz zapisane w kopii zapasowej.")));
+                     "Wszystko na Twoim komputerze zostanie zastąpione. " +
+                     "Upewnij się wcześniej, że wszystkie ważne dane masz w kopii zapasowej.")));
 
-        // Summary card
         var summary = new Gtk.Box (Gtk.Orientation.VERTICAL, 0);
         summary.add_css_class ("oobe-summary-box");
         summary.overflow = Gtk.Overflow.HIDDEN;
@@ -1126,11 +1227,17 @@ public class KibaOOBE : Adw.Application {
             { t ("Storage", "Depolama", "Pamięć"),
               selected_disk == "" ? t ("Auto-detected", "Otomatik algılandı", "Wykryto automatycznie") : GLib.Path.get_basename (selected_disk) },
             { t ("Install mode", "Kurulum modu", "Tryb instalacji"),
-              install_mode == "alongside" ? t ("Install alongside (dual boot)", "Yanına kur (çift önyükleme)", "Zainstaluj obok (dual boot)") : t ("Erase disk", "Diski sil", "Wyczyść dysk") },
+              install_mode == "alongside"
+                  ? t ("Install alongside (dual boot)", "Yanına kur (çift önyükleme)", "Zainstaluj obok (dual boot)")
+                  : t ("Erase disk", "Diski sil", "Wyczyść dysk") },
             { t ("Language", "Dil", "Język"), selected_locale },
             { t ("Keyboard", "Klavye", "Klawiatura"), selected_keymap },
             { t ("Account", "Hesap", "Konto"),
-              username_value == "" ? t ("(not set)", "(ayarlanmadı)", "(nie ustawiono)") : username_value }
+              username_value == "" ? t ("(not set)", "(ayarlanmadı)", "(nie ustawiono)") : username_value },
+            { t ("Hardware data", "Donanım verisi", "Dane sprzętowe"),
+              telemetry_agreed
+                  ? t ("Sharing with Kiba Labs", "Kiba Labs ile paylaşılıyor", "Udostępniane firmie Kiba Labs")
+                  : t ("Not sharing", "Paylaşılmıyor", "Nie udostępniane") }
         };
         bool first = true;
         foreach (var item in items) {
@@ -1145,8 +1252,8 @@ public class KibaOOBE : Adw.Application {
             var lbl = new Gtk.Label (item.key);
             lbl.add_css_class ("oobe-summary-key");
             row.append (lbl);
-            var spacer = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 0) { hexpand = true };
-            row.append (spacer);
+            var sp2 = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 0) { hexpand = true };
+            row.append (sp2);
             var val = new Gtk.Label (item.val);
             val.add_css_class ("oobe-summary-val");
             row.append (val);
@@ -1157,11 +1264,11 @@ public class KibaOOBE : Adw.Application {
         return make_page ("Confirm", content, t ("Install KibaOS", "KibaOS'u Kur", "Zainstaluj KibaOS"), () => {
             nav_view.push (build_installing_page ());
             start_install ();
-        }, false, 5, 6);
+        }, false, 5, 7);
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // Page 7: Installing
+    // Page 8: Installing
     // ══════════════════════════════════════════════════════════════════
     private Gtk.Label      progress_label;
     private Gtk.ProgressBar progress_bar;
@@ -1184,14 +1291,12 @@ public class KibaOOBE : Adw.Application {
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // Page 8: Done
+    // Page 9: Done
     // ══════════════════════════════════════════════════════════════════
     private Adw.NavigationPage build_done_page () {
         var content = new Gtk.Box (Gtk.Orientation.VERTICAL, 20);
 
-        var check = new Gtk.Label ("✓") {
-            halign = Gtk.Align.START
-        };
+        var check = new Gtk.Label ("✓") { halign = Gtk.Align.START };
         check.add_css_class ("oobe-done-check");
         content.append (check);
 
@@ -1214,19 +1319,18 @@ public class KibaOOBE : Adw.Application {
         string[] argv = {
             "sudo", "/usr/local/bin/kibaos-oem-finish.sh",
             selected_locale, selected_keymap, hostname_value,
-            username_value, password_value
+            username_value, password_value,
+            telemetry_agreed ? "1" : "0"   // consent state → backend writes /etc/kibad/telemetry-consent.state
         };
         launch_backend (argv);
     }
 
     private void start_install () {
-        // Disk partitioning/formatting, base extraction, and bootloader
-        // install all go through libkibadisk (sgdisk-subprocess-backed GPT
-        // writer) in kibaos-oobe-backend directly -- no archinstall detour.
         string[] argv = {
             "sudo", "/usr/local/bin/kibaos-oobe-backend",
             selected_disk, install_mode, selected_locale, selected_keymap,
-            hostname_value, username_value, password_value
+            hostname_value, username_value, password_value,
+            telemetry_agreed ? "1" : "0"   // consent state → backend writes /etc/kibad/telemetry-consent.state
         };
         launch_backend (argv);
     }
@@ -1235,12 +1339,6 @@ public class KibaOOBE : Adw.Application {
 
     private void launch_backend (string[] argv) {
         try {
-            // STDERR_MERGE folds the backend's stderr into the same pipe as
-            // stdout. Previously only STDOUT_PIPE was set, so every
-            // "FATAL: ..." line (the only place the *actual* error reason
-            // — kiba_fs_strerror()/strerror(errno) text — ever got written)
-            // went to the backend's inherited stderr and was simply lost,
-            // since sudo+a GUI launch has no terminal attached to catch it.
             var launcher = new GLib.SubprocessLauncher (
                 GLib.SubprocessFlags.STDOUT_PIPE | GLib.SubprocessFlags.STDERR_MERGE);
             var proc     = launcher.spawnv (argv);
@@ -1264,8 +1362,6 @@ public class KibaOOBE : Adw.Application {
                     progress_bar.fraction = pct / 100.0;
                     progress_label.label  = msg;
                 } else if (line.has_prefix ("FATAL: ")) {
-                    // Captured now that stderr is merged in — keep the real
-                    // reason so we can show it instead of a generic message.
                     last_fatal_message = line.substring (7);
                 }
             }
@@ -1276,7 +1372,7 @@ public class KibaOOBE : Adw.Application {
                 progress_label.label = last_fatal_message +
                     t ("\n(Full log: /var/log/kibaos-oobe.log)",
                        "\n(Tam günlük: /var/log/kibaos-oobe.log)",
-                       "\\n(Pełny dziennik: /var/log/kibaos-oobe.log)");
+                       "\n(Pełny dziennik: /var/log/kibaos-oobe.log)");
             } else {
                 progress_label.label = t (
                     "Something went wrong. Check /var/log/kibaos-oobe.log for details.",
