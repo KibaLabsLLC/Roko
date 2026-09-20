@@ -556,11 +556,15 @@ public class KibaOOBE : Adw.Application {
             if (secured) {
                 scan_paused_box[0] = true;
 
+                // NOTE: these three strings use plain quoted strings with
+                // escaped or curly quotes on purpose. A bare ASCII double
+                // quote inside a normal string literal ends the string and
+                // flips the lexer's quote parity for the rest of the file.
                 var dialog = new Adw.MessageDialog (window,
                     t ("Enter Wi-Fi Password", "Wi-Fi Şifresini Girin", "Wprowadź hasło Wi-Fi"),
-                    t ("""Enter the password for "%s".""",
-                       """"%s" ağının şifresini girin.""",
-                       "Wprowadź hasło dla „%s".").printf (ssid));
+                    t ("Enter the password for \"%s\".",
+                       "\"%s\" ağının şifresini girin.",
+                       "Wprowadź hasło dla „%s”.").printf (ssid));
 
                 var pw_entry = new Gtk.PasswordEntry () {
                     show_peek_icon    = true,
@@ -954,6 +958,12 @@ public class KibaOOBE : Adw.Application {
     // way to hand back a reference for sensitivity control, so this page
     // owns its card layout directly and calls make_corner_controls() for
     // the shared top-right overlay.
+    //
+    // Consent UX rules for this page:
+    //   * The disclosure states plainly that aggregated statistics may be
+    //     sold to third parties, in all three languages.
+    //   * "Don't Share" and "Share Hardware Data" carry the same CSS class
+    //     so neither button is visually the default choice.
     // ══════════════════════════════════════════════════════════════════
     private Adw.NavigationPage build_telemetry_consent_page () {
         bool[] scrolled_box = { false };
@@ -1022,9 +1032,9 @@ Before anything leaves this machine, it's aggregated locally and assigned a rota
 
     /var/log/kibad/telemetry-outbound.log
 
-Kiba Labs uses this data to publish aggregate hardware-compatibility research and to improve device support in future KibaOS releases. We do not sell data in a form that could identify you or your machine.
+How the data is used and sold: Kiba Labs uses this data to publish aggregate hardware-compatibility research and to improve device support in future KibaOS releases. Aggregated, anonymized hardware statistics may also be licensed or sold to third parties, such as hardware vendors and data marketplaces. We never sell data in a form that could identify you or your machine.
 
-Choosing "Don't Share" does not affect any KibaOS feature. You can change this choice later in Switchboard → Privacy.""",
+Choosing Don't Share does not affect any KibaOS feature. You can change this choice later in Switchboard → Privacy.""",
 """KibaOS, Kiba Labs ile her 6 saatte bir anonim donanım bilgisi paylaşabilir. Bu bilgiler, kullanıcılarımızın hangi donanıma güvendiğini anlamamıza ve cihaz uyumluluğunu iyileştirmemize yardımcı olur.
 
 Yalnızca bu makineden toplananlar:
@@ -1044,9 +1054,9 @@ Bu makineden herhangi bir şey ayrılmadan önce veriler yerel olarak toplanır 
 
     /var/log/kibad/telemetry-outbound.log
 
-Kiba Labs bu verileri toplu donanım uyumluluk araştırması yayınlamak ve gelecekteki KibaOS sürümlerinde cihaz desteğini iyileştirmek için kullanır.
+Verilerin kullanımı ve satışı: Kiba Labs bu verileri toplu donanım uyumluluk araştırması yayınlamak ve gelecekteki KibaOS sürümlerinde cihaz desteğini iyileştirmek için kullanır. Toplu ve anonimleştirilmiş donanım istatistikleri ayrıca donanım üreticileri ve veri pazar yerleri gibi üçüncü taraflara lisanslanabilir veya satılabilir. Sizi veya makinenizi tanımlayabilecek biçimde hiçbir veri satmayız.
 
-"Paylaşma" seçeneği hiçbir KibaOS özelliğini etkilemez. Bu seçimi daha sonra Switchboard → Gizlilik bölümünden değiştirebilirsiniz.""",
+Paylaşma seçeneği hiçbir KibaOS özelliğini etkilemez. Bu seçimi daha sonra Switchboard → Gizlilik bölümünden değiştirebilirsiniz.""",
 """KibaOS może raz na 6 godzin udostępniać anonimowe informacje o sprzęcie firmie Kiba Labs. Pomaga nam to zrozumieć, jakiego sprzętu używają nasi użytkownicy, i poprawiać kompatybilność urządzeń.
 
 Co jest zbierane — tylko z tego komputera:
@@ -1066,9 +1076,9 @@ Przed wysłaniem jakichkolwiek danych są one agregowane lokalnie i przypisywany
 
     /var/log/kibad/telemetry-outbound.log
 
-Kiba Labs używa tych danych do publikowania zbiorczych raportów o kompatybilności sprzętu i poprawy obsługi urządzeń w przyszłych wersjach KibaOS.
+Jak wykorzystujemy i sprzedajemy dane: Kiba Labs używa tych danych do publikowania zbiorczych raportów o kompatybilności sprzętu i poprawy obsługi urządzeń w przyszłych wersjach KibaOS. Zagregowane, zanonimizowane statystyki sprzętowe mogą być także licencjonowane lub sprzedawane podmiotom trzecim, takim jak producenci sprzętu i platformy handlu danymi. Nigdy nie sprzedajemy danych w formie, która mogłaby zidentyfikować Ciebie lub Twój komputer.
 
-Wybranie „Nie udostępniaj" nie wpływa na żadną funkcję KibaOS. Możesz zmienić tę opcję później w Switchboard → Prywatność.""");
+Wybranie opcji Nie udostępniaj nie wpływa na żadną funkcję KibaOS. Możesz zmienić tę opcję później w Switchboard → Prywatność.""");
 
         var consent_label = new Gtk.Label (consent_text) {
             wrap          = true,
@@ -1115,8 +1125,10 @@ Wybranie „Nie udostępniaj" nie wpływa na żadną funkcję KibaOS. Możesz zm
         back_btn.clicked.connect (() => nav_view.pop ());
         nav_row.append (back_btn);
 
+        // Equal visual weight: both choices use the same style class so
+        // neither button is highlighted as the default.
         var decline_btn = new Gtk.Button.with_label (t ("Don't Share", "Paylaşma", "Nie udostępniaj"));
-        decline_btn.add_css_class ("oobe-secondary-button");
+        decline_btn.add_css_class ("oobe-primary-button");
         decline_btn.sensitive = false;
         nav_row.append (decline_btn);
 
