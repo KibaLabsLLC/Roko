@@ -18,7 +18,9 @@
 #include "kiba_udev.h"
 #include "kiba_install.h"
 
+#include <errno.h>
 #include <fcntl.h>
+#include <glob.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -191,6 +193,69 @@ static void kiba_seed_default_session(const char *target_root, const char *usern
         "XSession=budgie-desktop\n"
         "SystemAccount=false\n");
     fclose(f);
+}
+
+/* ── chroot chown ──────────────────────────────────────────────────────
+ * Equivalent to running, inside a chroot of target_root:
+ *     chown -R 1000:1000 /home/*\/.local/
+ *     chown -R 1000:1000 /var/lib
+ * (no sudo needed -- this backend is already root).
+ *
+ * Forks a child that chroot()s into target_root and exec's chown directly
+ * (no shell). If glob_pat is non-NULL it is expanded *inside* the chroot
+ * via glob(3), so it matches the installed system's home dirs rather than
+ * the live medium's; no matches is treated as success. Otherwise
+ * literal_path is chowned as-is.
+ *
+ * Best-effort and non-fatal: failures are logged to the install log. */
+static void chroot_chown_1000(const char *target_root, const char *glob_pat,
+                              const char *literal_path) {
+    fflush(stdout);
+    if (g_logfp) fflush(g_logfp);
+
+    pid_t pid = fork();
+    if (pid < 0) return;
+
+    if (pid == 0) {
+        if (chroot(target_root) != 0 || chdir("/") != 0) _exit(126);
+
+        char **av = NULL;
+        size_t n = 0;
+
+        if (glob_pat) {
+            glob_t g;
+            int rc = glob(glob_pat, 0, NULL, &g);
+            if (rc == GLOB_NOMATCH) _exit(0);   /* nothing to chown */
+            if (rc != 0) _exit(125);
+            av = calloc(g.gl_pathc + 4, sizeof(char *));
+            if (!av) _exit(125);
+            av[n++] = "chown";
+            av[n++] = "-R";
+            av[n++] = "1000:1000";
+            for (size_t i = 0; i < g.gl_pathc; i++) av[n++] = g.gl_pathv[i];
+        } else {
+            av = calloc(5, sizeof(char *));
+            if (!av) _exit(125);
+            av[n++] = "chown";
+            av[n++] = "-R";
+            av[n++] = "1000:1000";
+            av[n++] = (char *)literal_path;
+        }
+        av[n] = NULL;
+
+        execvp("chown", av);
+        _exit(127);
+    }
+
+    int status = 0;
+    while (waitpid(pid, &status, 0) < 0) {
+        if (errno != EINTR) return;
+    }
+    if (!(WIFEXITED(status) && WEXITSTATUS(status) == 0) && g_logfp) {
+        fprintf(g_logfp, "WARN: chroot chown (%s) failed, status=0x%x\n",
+                glob_pat ? glob_pat : literal_path, status);
+        fflush(g_logfp);
+    }
 }
 
 /* ── KibaD install ─────────────────────────────────────────────────────
@@ -462,6 +527,13 @@ int main(int argc, char **argv) {
         FILE *f = fopen(p, "w");
         if (f) fclose(f);
     }
+
+    /* ── 12b. Ownership fixups in the target (chroot) ────────────────────
+     * Runs after the user exists and after everything that writes to
+     * /var/lib or /home has finished. Best-effort and non-fatal. */
+    progress(96, "Fixing file ownership...");
+    chroot_chown_1000(target_root, "/home/*/.local/", NULL);
+    chroot_chown_1000(target_root, NULL, "/var/lib");
 
     /* ── 13. KibaD: enable systemd unit + write telemetry consent ───────
      * install_kibad() drops the wants symlink so kibad starts on first
