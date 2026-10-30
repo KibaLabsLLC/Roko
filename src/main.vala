@@ -109,7 +109,17 @@ public class KibaOOBE : Adw.Application {
 
     private void load_css () {
         var p = new Gtk.CssProvider ();
-        p.load_from_path ("/usr/share/kibaos-oobe/oobe.css");
+        string[] candidate_paths = {
+            "/usr/share/kibaos-oobe/oobe.css",
+            "oobe.css",
+            "../oobe.css"
+        };
+        foreach (var path in candidate_paths) {
+            if (GLib.FileUtils.test (path, GLib.FileTest.EXISTS)) {
+                p.load_from_path (path);
+                break;
+            }
+        }
         Gtk.StyleContext.add_provider_for_display (
             Gdk.Display.get_default (), p, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION);
     }
@@ -367,15 +377,15 @@ public class KibaOOBE : Adw.Application {
             double start_angle = Math.PI * (1.0 + 0.18);
             double end_angle   = Math.PI * (2.0 - 0.18);
 
-            cr.set_source_rgba (0.0, 0.60, 0.80, a3 * 0.85);
+            cr.set_source_rgba (0.0, 0.48, 1.0, a3 * 0.85);
             cr.arc (cx, cy, r3, start_angle, end_angle);
             cr.stroke ();
 
-            cr.set_source_rgba (0.0, 0.60, 0.80, a2 * 0.90);
+            cr.set_source_rgba (0.0, 0.48, 1.0, a2 * 0.90);
             cr.arc (cx, cy, r2, start_angle, end_angle);
             cr.stroke ();
 
-            cr.set_source_rgba (0.0, 0.60, 0.80, a1 * 0.95);
+            cr.set_source_rgba (0.0, 0.48, 1.0, a1 * 0.95);
             cr.arc (cx, cy, r1, start_angle, end_angle);
             cr.stroke ();
 
@@ -383,12 +393,12 @@ public class KibaOOBE : Adw.Application {
             double rip_r = 6.0 + dp * 18.0;
             double rip_a = (1.0 - dp) * 0.55;
 
-            cr.set_source_rgba (0.0, 0.60, 0.80, rip_a);
+            cr.set_source_rgba (0.0, 0.48, 1.0, rip_a);
             cr.set_line_width (2.0);
             cr.arc (cx, cy + r3 - 2.0 + wiggle[0] * 3.0, rip_r, 0, 2 * Math.PI);
             cr.stroke ();
 
-            cr.set_source_rgba (0.0, 0.60, 0.80, 1.0);
+            cr.set_source_rgba (0.0, 0.48, 1.0, 1.0);
             cr.arc (cx, cy + r3 - 2.0 + wiggle[0] * 3.0, 5.5, 0, 2 * Math.PI);
             cr.fill ();
         });
@@ -1088,7 +1098,7 @@ Wybranie opcji Nie udostępniaj nie wpływa na żadną funkcję KibaOS. Możesz 
             margin_top    = 2,
             margin_bottom = 2
         };
-        consent_label.add_css_class ("oobe-subtitle");
+        consent_label.add_css_class ("oobe-consent-text");
 
         var scroller = new Gtk.ScrolledWindow () {
             hscrollbar_policy        = Gtk.PolicyType.NEVER,
