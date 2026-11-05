@@ -6,6 +6,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <glob.h>
 #include <spawn.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -266,15 +267,56 @@ int kiba_install_copy_kernel(const char *image_path, const char *target_root) {
     snprintf(vmlinuz_dst, sizeof(vmlinuz_dst), "%s/boot/vmlinuz-linux", target_root);
     snprintf(initrd_dst,  sizeof(initrd_dst),  "%s/boot/initramfs-linux.img", target_root);
 
+    /* The path derived from the image location is the archiso convention,
+     * but it can miss (image found at an unexpected depth, copytoram,
+     * custom install_dir...). Try a few more places before giving up. */
     struct stat st;
-    if (stat(vmlinuz_src, &st) != 0) {
+    char found_vmlinuz[600] = "";
+    char found_initrd[600]  = "";
+    if (stat(vmlinuz_src, &st) == 0) {
+        snprintf(found_vmlinuz, sizeof(found_vmlinuz), "%s", vmlinuz_src);
+        snprintf(found_initrd,  sizeof(found_initrd),  "%s", initrd_src);
+    }
+
+    /* (2) boot medium mount points, any <install_dir>/boot/<arch>/ */
+    if (!found_vmlinuz[0]) {
+        const char *roots[] = { "/run/archiso/bootmnt", "/run/archiso/copytoram", "/run/mnt" };
+        for (size_t i = 0; i < sizeof(roots)/sizeof(roots[0]) && !found_vmlinuz[0]; i++) {
+            char pat[700];
+            snprintf(pat, sizeof(pat), "%s/*/boot/%s/vmlinuz-%s", roots[i], karch, kpkg_suffix);
+            glob_t g;
+            if (glob(pat, 0, NULL, &g) == 0 && g.gl_pathc > 0) {
+                snprintf(found_vmlinuz, sizeof(found_vmlinuz), "%s", g.gl_pathv[0]);
+                snprintf(found_initrd, sizeof(found_initrd), "%s", g.gl_pathv[0]);
+                char *b = strstr(found_initrd, "/vmlinuz-");
+                if (b) snprintf(b, sizeof(found_initrd) - (size_t)(b - found_initrd),
+                                "/initramfs-%s.img", kpkg_suffix);
+            }
+            globfree(&g);
+        }
+    }
+
+    /* (3) the kernel pacman installed into the extracted image itself:
+     * mkarchiso only strips /boot, not /usr/lib/modules/<ver>/vmlinuz.
+     * The initramfs is regenerated later by mkinitcpio anyway. */
+    if (!found_vmlinuz[0]) {
+        char pat[700];
+        snprintf(pat, sizeof(pat), "%s/usr/lib/modules/*/vmlinuz", target_root);
+        glob_t g;
+        if (glob(pat, 0, NULL, &g) == 0 && g.gl_pathc > 0)
+            snprintf(found_vmlinuz, sizeof(found_vmlinuz), "%s", g.gl_pathv[g.gl_pathc - 1]);
+        globfree(&g);
+    }
+
+    if (!found_vmlinuz[0]) {
         snprintf(g_install_err, sizeof(g_install_err),
                   "kernel not found on boot medium at %s: %s", vmlinuz_src, strerror(errno));
         return -1;
     }
 
-    char *argv[] = { (char *)"cp", (char *)"-a", vmlinuz_src, vmlinuz_dst, NULL };
+    char *argv[] = { (char *)"cp", (char *)"-a", found_vmlinuz, vmlinuz_dst, NULL };
     if (run_argv(argv) != 0) return -1;
+    snprintf(initrd_src, sizeof(initrd_src), "%s", found_initrd[0] ? found_initrd : initrd_src);
 
     /* initramfs-linux.img gets rebuilt from scratch a few steps later
      * in kiba_install_finalize (mkinitcpio -g), so this copy isn't load-
