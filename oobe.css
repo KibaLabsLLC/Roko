@@ -1,115 +1,129 @@
 /* ═══════════════════════════════════════════════════════════════════════
- * KibaOS OOBE — Modern macOS Light Mode Design Language
- * Palette: macOS Light (#f5f5f7 backdrop, #ffffff card, #007aff accents)
- * High contrast black text for max legibility.
+ * KibaOS OOBE — floating-window design, light mode by default.
+ *
+ * The installer is a fixed-size, rounded window that floats over the
+ * desktop wallpaper (see KibaOOBE.activate / build_window_shell in
+ * main.vala). Content is left-aligned: logo tile, title, subtitle, with
+ * the step indicator bottom-left and the action buttons bottom-right.
+ *
+ * Accessibility: every text colour below meets WCAG 2.1 AA (>= 4.5:1)
+ * against the surface it sits on, and every control boundary / focus
+ * ring meets the 3:1 non-text minimum. Ratios are noted on the tokens.
+ *
+ * Light surfaces : #ffffff window, #f5f5f7 inset surfaces
+ * Light text     : #000000 / #1d1d1f (≥ 16:1), #3a3a3c (11.4:1),
+ *                  #505055 (8.0:1)
+ * Light accent   : #0062cc (5.8:1 with white text and on white)
+ * Dark surfaces  : #2c2c2e window, #3a3a3c inset surfaces
+ * Dark text      : #ffffff, #e5e5ea (11.1:1), #c7c7cc (8.3:1)
+ * Dark accent    : #6cb0ff (6.2:1 on #2c2c2e, 8.8:1 under #0a0a0c text)
  * ═══════════════════════════════════════════════════════════════════════ */
 
-/* ── Window / background ───────────────────────────────────────────────── */
+/* ── Window ────────────────────────────────────────────────────────────── */
 window.kibaos-oobe-window {
-    background: #f5f5f7;
-    color: #1d1d1f;
+    background: #ffffff;
+    color:      #1d1d1f;
+}
+window.dark.kibaos-oobe-window {
+    background: #2c2c2e;
+    color:      #ffffff;
 }
 
-.oobe-background {
-    background: radial-gradient(circle at 50% 20%, #ffffff 0%, #f0f0f5 60%, #e5e5ea 100%);
-    transition: background 260ms cubic-bezier(0.22, 1, 0.36, 1);
+.oobe-window {
+    background: #ffffff;
+    color:      #1d1d1f;
 }
-window.dark .oobe-background {
-    background: #1c1c1e;
+window.dark .oobe-window {
+    background: #2c2c2e;
+    color:      #ffffff;
 }
 
-/* ── Brand wordmark ────────────────────────────────────────────────────── */
+/* ── Title strip (drag handle, brand, corner controls) ─────────────────── */
+.oobe-titlebar {
+    padding: 18px 24px 0 28px;
+}
+
 .oobe-brand {
-    font-size: 16px;
-    font-weight: 700;
+    font-size:      15px;
+    font-weight:    700;
     letter-spacing: -0.2px;
-    color: #000000;
+    color:          #1d1d1f;
 }
-window.dark .oobe-brand {
-    color: #ffffff;
-}
+window.dark .oobe-brand { color: #ffffff; }
 
-/* ── Corner controls (language / dark-mode toggle) ───────────────────────── */
 .oobe-corner-button {
     background:    #ffffff;
     color:         #1d1d1f;
-    border:        1px solid rgba(0, 0, 0, 0.12);
+    border:        1px solid #8a8a8e;               /* 3.4:1 */
     border-radius: 999px;
     min-width:     36px;
-    min-height:    34px;
-    padding:       6px 14px;
-    font-size:     12px;
+    min-height:    32px;
+    padding:       4px 14px;
+    font-size:     13px;
     font-weight:   600;
-    box-shadow:    0 1px 3px rgba(0, 0, 0, 0.05);
     transition:
         background-color 140ms cubic-bezier(0.22, 1, 0.36, 1),
-        border-color     140ms cubic-bezier(0.22, 1, 0.36, 1),
-        transform        140ms cubic-bezier(0.22, 1, 0.36, 1);
+        border-color     140ms cubic-bezier(0.22, 1, 0.36, 1);
 }
-.oobe-corner-button:hover  {
-    background: #f0f0f5;
-    border-color: rgba(0, 0, 0, 0.18);
-    transform: translateY(-1px);
-}
-.oobe-corner-button:active {
-    background: #e5e5ea;
-    transform: translateY(0);
-}
+.oobe-corner-button:hover  { background: #f0f0f5; border-color: #636366; }
+.oobe-corner-button:active { background: #e5e5ea; }
 window.dark .oobe-corner-button {
-    background: rgba(44, 44, 46, 0.8);
-    color:      #ffffff;
-    border-color: rgba(255, 255, 255, 0.18);
+    background:   #3a3a3c;
+    color:        #ffffff;
+    border-color: #98989d;                           /* 4.9:1 */
 }
-window.dark .oobe-corner-button:hover { background: rgba(58, 58, 60, 0.9); }
+window.dark .oobe-corner-button:hover  { background: #48484a; border-color: #c7c7cc; }
+window.dark .oobe-corner-button:active { background: #636366; }
 
-/* ── Floating macOS Window Card ────────────────────────────────────────── */
-.oobe-card {
-    background:    #ffffff;
-    border:        1px solid rgba(0, 0, 0, 0.08);
-    border-radius: 20px;
-    box-shadow:    0 20px 48px rgba(0, 0, 0, 0.10), 0 1px 3px rgba(0, 0, 0, 0.05);
-    animation:     card-in 460ms cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-window.dark .oobe-card {
-    background:    #2c2c2e;
-    border-color:  rgba(255, 255, 255, 0.1);
-    box-shadow:    0 20px 48px rgba(0, 0, 0, 0.4);
-}
+/* ── Content / footer ──────────────────────────────────────────────────── */
+.oobe-inner  { padding: 20px 40px 12px 40px; }
+.oobe-footer { padding: 14px 32px 24px 40px; }
+.oobe-nav-row { margin: 0; }
 
-@keyframes card-in {
-    from { opacity: 0; transform: translateY(16px) scale(0.98); }
-    to   { opacity: 1; transform: translateY(0) scale(1.0);    }
+/* ── Logo tile (welcome page) ──────────────────────────────────────────── */
+.oobe-logo-tile {
+    background:    #f5f5f7;
+    border:        1px solid #d1d1d6;
+    border-radius: 16px;
+    padding:       12px;
+    animation:     fade-up 380ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
-
-.oobe-inner {
-    padding: 32px 36px 32px;
+window.dark .oobe-logo-tile {
+    background:   #3a3a3c;
+    border-color: #636366;
 }
 
-/* ── Step dots ─────────────────────────────────────────────────────────── */
+/* ── Step indicator ────────────────────────────────────────────────────── */
 .oobe-step-dot {
     min-width:     8px;
     min-height:    8px;
     border-radius: 999px;
-    background:    rgba(0, 0, 0, 0.18);
+    background:    #8e8e93;                         /* 3.3:1 */
     transition:    all 300ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 .oobe-step-dot-active {
     min-width:  24px;
-    background: #007aff;
+    background: #0062cc;
 }
-window.dark .oobe-step-dot { background: rgba(255, 255, 255, 0.22); }
-window.dark .oobe-step-dot-active { background: #0a84ff; }
+window.dark .oobe-step-dot        { background: #98989d; }
+window.dark .oobe-step-dot-active { background: #6cb0ff; }
 
-/* ── Nav row ───────────────────────────────────────────────────────────── */
-.oobe-nav-row { margin-top: 8px; }
+.oobe-step-label {
+    font-size:      13px;
+    font-weight:    600;
+    color:          #505055;                        /* 8.0:1 */
+    letter-spacing: 0.2px;
+}
+window.dark .oobe-step-label { color: #c7c7cc; }    /* 8.3:1 */
 
 /* ── Typography ────────────────────────────────────────────────────────── */
 .oobe-welcome-greeting {
-    font-size:      42px;
+    font-size:      32px;
     font-weight:    700;
     color:          #000000;
     letter-spacing: -0.5px;
-    margin-top:     4px;
+    line-height:    1.2;
+    margin-top:     8px;
     animation:      fade-up 460ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 window.dark .oobe-welcome-greeting { color: #ffffff; }
@@ -126,12 +140,12 @@ window.dark .oobe-welcome-greeting { color: #ffffff; }
 .oobe-subtitle {
     font-size:   15px;
     font-weight: 400;
-    color:       #3a3a3c;
+    color:       #3a3a3c;                           /* 11.4:1 */
     line-height: 1.5;
     animation:   fade-up 380ms cubic-bezier(0.22, 1, 0.36, 1) 100ms both;
 }
 .oobe-consent-text {
-    font-size:   13px;
+    font-size:   14px;
     font-weight: 400;
     color:       #1d1d1f;
     line-height: 1.55;
@@ -147,21 +161,11 @@ window.dark .oobe-consent-text { color: #f2f2f7; }
 .oobe-error {
     font-size:   14px;
     font-weight: 600;
-    color:       #ff3b30;
+    color:       #c4170c;                           /* 6.0:1 */
     line-height: 1.5;
     animation:   fade-up 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
-window.dark .oobe-error { color: #ff453a; }
-
-/* ── Step counter ──────────────────────────────────────────────────────── */
-.oobe-step-label {
-    font-size:      12px;
-    font-weight:    600;
-    color:          #6c6c70;
-    letter-spacing: 0.3px;
-    text-transform: uppercase;
-}
-window.dark .oobe-step-label { color: #aeaeb2; }
+window.dark .oobe-error { color: #ff6961; }         /* 4.9:1 */
 
 /* ── Wi-Fi canvas ──────────────────────────────────────────────────────── */
 .oobe-wifi-canvas {
@@ -177,17 +181,17 @@ window.dark .oobe-step-label { color: #aeaeb2; }
 
 .oobe-signal-glyph {
     font-family: monospace;
-    font-size: 15px;
+    font-size:   15px;
     font-weight: 700;
-    color: #007aff;
-    min-width: 34px;
+    color:       #0062cc;
+    min-width:   34px;
 }
-window.dark .oobe-signal-glyph { color: #0a84ff; }
+window.dark .oobe-signal-glyph { color: #6cb0ff; }
 
 .oobe-list row,
 listview > row {
     background:    #ffffff;
-    border:        1px solid rgba(0, 0, 0, 0.10);
+    border:        1px solid #8a8a8e;               /* 3.4:1 */
     border-radius: 12px;
     margin:        5px 0;
     padding:       12px 16px;
@@ -195,92 +199,83 @@ listview > row {
     transition:
         background-color 180ms cubic-bezier(0.22, 1, 0.36, 1),
         border-color     180ms cubic-bezier(0.22, 1, 0.36, 1),
-        box-shadow       180ms cubic-bezier(0.22, 1, 0.36, 1),
-        transform        180ms cubic-bezier(0.22, 1, 0.36, 1);
+        box-shadow       180ms cubic-bezier(0.22, 1, 0.36, 1);
     animation: fade-up 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
-.oobe-list row label {
-    color: #000000;
-}
+.oobe-list row label { color: #000000; opacity: 1; }
 .oobe-list row:hover {
-    background: #f0f4ff;
-    border-color: rgba(0, 122, 255, 0.35);
+    background:   #eef4ff;
+    border-color: #0062cc;
 }
 .oobe-list row:selected {
-    background: rgba(0, 122, 255, 0.08);
-    border-color: #007aff;
-    box-shadow: 0 0 0 2px rgba(0, 122, 255, 0.25);
+    background:   #dbe9ff;
+    border-color: #0062cc;
+    box-shadow:   0 0 0 2px #0062cc;
+}
+.oobe-list row:selected label { color: #000000; }
+.oobe-list row:focus-visible {
+    outline:        3px solid #0062cc;
+    outline-offset: 2px;
 }
 window.dark .oobe-list row,
 window.dark listview > row {
-    background: rgba(44, 44, 46, 0.8);
-    border-color: rgba(255, 255, 255, 0.12);
-    color: #ffffff;
+    background:   #3a3a3c;
+    border-color: #98989d;
+    color:        #ffffff;
 }
-window.dark .oobe-list row label {
-    color: #ffffff;
-}
-window.dark .oobe-list row:hover {
-    background: rgba(10, 132, 255, 0.18);
-    border-color: rgba(10, 132, 255, 0.5);
-}
+window.dark .oobe-list row label    { color: #ffffff; }
+window.dark .oobe-list row:hover    { background: #0a3a73; border-color: #6cb0ff; }
 window.dark .oobe-list row:selected {
-    background: rgba(10, 132, 255, 0.28);
-    border-color: #0a84ff;
+    background:   #0a3a73;
+    border-color: #6cb0ff;
+    box-shadow:   0 0 0 2px #6cb0ff;
 }
+window.dark .oobe-list row:selected label { color: #ffffff; }
+window.dark .oobe-list row:focus-visible  { outline-color: #6cb0ff; }
 
 /* ── Preferences group (account page) ─────────────────────────────────── */
 .oobe-prefs-group {
     border-radius: 12px;
-    border: 1px solid rgba(0, 0, 0, 0.10);
-    overflow: hidden;
-    background: #ffffff;
+    border:        1px solid #8a8a8e;
+    background:    #ffffff;
 }
 window.dark .oobe-prefs-group {
-    background: rgba(44, 44, 46, 0.8);
-    border-color: rgba(255, 255, 255, 0.12);
+    background:   #3a3a3c;
+    border-color: #98989d;
 }
 
 /* ── Summary box (confirm page) ────────────────────────────────────────── */
 .oobe-summary-box {
     background:    #ffffff;
-    border:        1px solid rgba(0, 0, 0, 0.10);
+    border:        1px solid #8a8a8e;
     border-radius: 14px;
-    overflow:      hidden;
     margin-top:    8px;
 }
-.oobe-summary-row {
-    padding: 12px 18px;
-}
-.oobe-summary-sep {
-    margin: 0 18px;
-    opacity: 0.15;
-}
+.oobe-summary-row { padding: 12px 18px; }
+.oobe-summary-sep { margin: 0 18px; opacity: 0.35; }
 .oobe-summary-key {
-    font-size:   13px;
+    font-size:   14px;
     font-weight: 600;
-    color:       #3a3a3c;
+    color:       #3a3a3c;                           /* 11.4:1 */
 }
 .oobe-summary-val {
-    font-size: 13px;
+    font-size:   14px;
     font-weight: 600;
-    color:     #000000;
+    color:       #000000;
 }
-window.dark .oobe-summary-box { background: rgba(44, 44, 46, 0.8); border-color: rgba(255, 255, 255, 0.12); }
-window.dark .oobe-summary-key { color: #aeaeb2; }
+window.dark .oobe-summary-box { background: #3a3a3c; border-color: #98989d; }
+window.dark .oobe-summary-key { color: #c7c7cc; }
 window.dark .oobe-summary-val { color: #ffffff; }
 
 /* ── Done check icon ───────────────────────────────────────────────────── */
 .oobe-done-check {
-    color: #34c759;
-    font-size: 52px;
-    font-weight: 800;
+    color:         #1b7f3a;                         /* 5.1:1 */
+    font-size:     52px;
+    font-weight:   800;
     margin-bottom: -6px;
-    animation: pop-in 500ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+    animation:     pop-in 500ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
-window.dark .oobe-done-check {
-    color: #30d158;
-}
+window.dark .oobe-done-check { color: #30d158; }
 @keyframes pop-in {
     from { opacity: 0; transform: scale(0.4); }
     to   { opacity: 1; transform: scale(1);   }
@@ -288,122 +283,141 @@ window.dark .oobe-done-check {
 
 /* ── Buttons ───────────────────────────────────────────────────────────── */
 .oobe-primary-button {
-    background:    #007aff;
+    background:    #0062cc;                          /* 5.8:1 with white */
     color:         #ffffff;
-    border:        none;
+    border:        1px solid #0062cc;
     border-radius: 999px;
-    padding:       12px 28px;
+    padding:       10px 28px;
     font-weight:   600;
     font-size:     15px;
     min-width:     120px;
-    box-shadow:    0 2px 6px rgba(0, 122, 255, 0.25);
+    box-shadow:    0 2px 6px rgba(0, 98, 204, 0.25);
     transition:
         background-color 140ms cubic-bezier(0.22, 1, 0.36, 1),
-        box-shadow       140ms cubic-bezier(0.22, 1, 0.36, 1),
-        transform        120ms cubic-bezier(0.22, 1, 0.36, 1);
+        box-shadow       140ms cubic-bezier(0.22, 1, 0.36, 1);
 }
-.oobe-primary-button:hover {
-    background: #0062cc;
-    box-shadow: 0 4px 10px rgba(0, 122, 255, 0.35);
-    transform:  translateY(-1px);
+.oobe-primary-button:hover  { background: #0052a8; border-color: #0052a8; }
+.oobe-primary-button:active { background: #004489; border-color: #004489; box-shadow: none; }
+.oobe-primary-button:focus-visible {
+    outline:        3px solid #000000;
+    outline-offset: 2px;
 }
-.oobe-primary-button:active {
-    background: #004fb3;
-    transform:  translateY(0);
-    box-shadow: 0 1px 3px rgba(0, 122, 255, 0.2);
+.oobe-primary-button:disabled {
+    background:   #e5e5ea;
+    border-color: #8a8a8e;
+    color:        #505055;                           /* 6.6:1 on #e5e5ea */
+    box-shadow:   none;
+}
+window.dark .oobe-primary-button {
+    background:   #6cb0ff;
+    border-color: #6cb0ff;
+    color:        #0a0a0c;                           /* 8.8:1 */
+    box-shadow:   none;
+}
+window.dark .oobe-primary-button:hover  { background: #8cc2ff; border-color: #8cc2ff; }
+window.dark .oobe-primary-button:active { background: #4f9cf0; border-color: #4f9cf0; }
+window.dark .oobe-primary-button:focus-visible { outline-color: #ffffff; }
+window.dark .oobe-primary-button:disabled {
+    background:   #48484a;
+    border-color: #98989d;
+    color:        #e5e5ea;
 }
 
 .oobe-secondary-button {
     background:    #ffffff;
     color:         #000000;
-    border:        1px solid rgba(0, 0, 0, 0.15);
+    border:        1px solid #8a8a8e;
     border-radius: 999px;
-    padding:       12px 24px;
+    padding:       10px 24px;
     font-size:     15px;
     font-weight:   600;
     min-width:     100px;
-    box-shadow:    0 1px 2px rgba(0, 0, 0, 0.04);
     transition:
         background-color 140ms cubic-bezier(0.22, 1, 0.36, 1),
-        border-color     140ms cubic-bezier(0.22, 1, 0.36, 1),
-        transform        120ms cubic-bezier(0.22, 1, 0.36, 1);
+        border-color     140ms cubic-bezier(0.22, 1, 0.36, 1);
 }
-.oobe-secondary-button:hover  {
-    background: #f5f5f7;
-    border-color: rgba(0, 0, 0, 0.25);
-    transform: translateY(-1px);
-}
-.oobe-secondary-button:active {
-    background: #e5e5ea;
-    transform: translateY(0);
+.oobe-secondary-button:hover  { background: #f0f0f5; border-color: #636366; }
+.oobe-secondary-button:active { background: #e5e5ea; }
+.oobe-secondary-button:focus-visible {
+    outline:        3px solid #0062cc;
+    outline-offset: 2px;
 }
 window.dark .oobe-secondary-button {
-    background: rgba(44, 44, 46, 0.8);
-    color: #ffffff;
-    border-color: rgba(255, 255, 255, 0.2);
+    background:   #3a3a3c;
+    color:        #ffffff;
+    border-color: #98989d;
 }
-window.dark .oobe-secondary-button:hover  { background: rgba(58, 58, 60, 0.9); }
+window.dark .oobe-secondary-button:hover  { background: #48484a; border-color: #c7c7cc; }
+window.dark .oobe-secondary-button:active { background: #636366; }
+window.dark .oobe-secondary-button:focus-visible { outline-color: #6cb0ff; }
 
 /* ── Progress bar ──────────────────────────────────────────────────────── */
-.oobe-progress { min-height: 6px; border-radius: 999px; }
+.oobe-progress { min-height: 8px; border-radius: 999px; }
 .oobe-progress trough {
-    background:    #e5e5ea;
+    background:    #d1d1d6;
+    border:        1px solid #8a8a8e;
     border-radius: 999px;
-    min-height:    6px;
+    min-height:    8px;
 }
 .oobe-progress progress {
-    background:  #007aff;
+    background:    #0062cc;
     border-radius: 999px;
-    transition:  all 450ms cubic-bezier(0.22, 1, 0.36, 1);
+    transition:    all 450ms cubic-bezier(0.22, 1, 0.36, 1);
 }
-window.dark .oobe-progress trough { background: rgba(255, 255, 255, 0.12); }
-window.dark .oobe-progress progress { background: #0a84ff; }
+window.dark .oobe-progress trough   { background: #48484a; border-color: #98989d; }
+window.dark .oobe-progress progress { background: #6cb0ff; }
 
 /* ── Form entries ──────────────────────────────────────────────────────── */
 entry, row.entry, .oobe-prefs-group entry {
-    background:  #ffffff;
-    border:      1px solid rgba(0, 0, 0, 0.12);
+    background:    #ffffff;
+    border:        1px solid #8a8a8e;
     border-radius: 10px;
-    color:       #000000;
-    padding:     8px 12px;
+    color:         #000000;
+    padding:       8px 12px;
     transition:
         border-color     160ms cubic-bezier(0.22, 1, 0.36, 1),
         background-color 160ms cubic-bezier(0.22, 1, 0.36, 1),
         box-shadow       160ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 entry:focus-within, row.entry:focus-within {
-    border-color: #007aff;
+    border-color: #0062cc;
     background:   #ffffff;
-    box-shadow:   0 0 0 3px rgba(0, 122, 255, 0.25);
+    box-shadow:   0 0 0 3px rgba(0, 98, 204, 0.45);
 }
+/* Adwaita dims placeholder/title text with opacity; keep it ≥ 4.5:1 */
+entry text > placeholder,
+entry placeholder       { color: #5a5a5f; opacity: 1; }     /* 6.6:1 */
+row.entry label         { color: #3a3a3c; opacity: 1; }
 window.dark entry, window.dark row.entry, window.dark .oobe-prefs-group entry {
-    background: rgba(44, 44, 46, 0.9);
-    border-color: rgba(255, 255, 255, 0.15);
-    color: #ffffff;
+    background:   #3a3a3c;
+    border-color: #98989d;
+    color:        #ffffff;
 }
+window.dark entry:focus-within, window.dark row.entry:focus-within {
+    border-color: #6cb0ff;
+    box-shadow:   0 0 0 3px rgba(108, 176, 255, 0.55);
+}
+window.dark entry text > placeholder,
+window.dark entry placeholder { color: #c7c7cc; opacity: 1; }
+window.dark row.entry label   { color: #e5e5ea; opacity: 1; }
 
 /* ── ComboRow / ActionRow (Adwaita overrides) ──────────────────────────── */
 row.combo, row.action {
     border-radius: 10px;
     background:    #ffffff;
     color:         #000000;
-    border:        1px solid rgba(0, 0, 0, 0.10);
+    border:        1px solid #8a8a8e;
     margin:        4px 0;
 }
-row.combo label, row.action label {
-    color: #000000;
-}
+row.combo label, row.action label { color: #000000; opacity: 1; }
 row.combo .subtitle, row.action .subtitle {
-    color: #3a3a3c;
+    color:   #3a3a3c;
+    opacity: 1;                                      /* undo Adwaita dimming */
 }
 window.dark row.combo, window.dark row.action {
-    background: rgba(44, 44, 46, 0.8);
-    border-color: rgba(255, 255, 255, 0.12);
-    color: #ffffff;
+    background:   #3a3a3c;
+    border-color: #98989d;
+    color:        #ffffff;
 }
-window.dark row.combo label, window.dark row.action label {
-    color: #ffffff;
-}
-window.dark row.combo .subtitle, window.dark row.action .subtitle {
-    color: #e5e5ea;
-}
+window.dark row.combo label, window.dark row.action label { color: #ffffff; }
+window.dark row.combo .subtitle, window.dark row.action .subtitle { color: #e5e5ea; }
