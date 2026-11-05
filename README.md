@@ -1,6 +1,6 @@
 # ✦  Rōkō (狼吼) — “wolf's howl” |  KibaOS OOBE Setup ✦ 
 
-### The fullscreen, one-step-per-screen out-of-box-experience installer for KibaOS.
+### The floating-window, one-step-per-screen out-of-box-experience installer for KibaOS.
 
 ## Layout
 
@@ -24,8 +24,8 @@ src/
     kibaos_oobe_backend_main.c       # orchestrator; builds into
                                       # /usr/local/bin/kibaos-oobe-backend
     Makefile                         # builds libkibadisk.a + the backend
-oobe.css                     # white-card design language, navy/glass
-                              # KibaOS palette, light + dark
+oobe.css                     # floating-window design language, light by
+                              # default (+ dark), WCAG AA text contrast
 scripts/
   kibaos-oem-finish.sh        # OEM-mode completion (already-installed
                                # system: locale/keyboard/account only,
@@ -37,10 +37,12 @@ build.sh                      # builds everything in isolation
 
 ## Design
 
-- **UI**: a `NavigationView` stack, one page per step. No sidebar, no
-  visible step list — deliberately matches a Windows-OOBE
-  single-question-per-screen feel, themed in KibaOS's own navy/glass
-  palette (see `oobe.css`).
+- **UI**: a `NavigationView` stack, one page per step, shown in a
+  fixed-size, draggable window that floats over the desktop wallpaper
+  (not fullscreen). Content is left-aligned (logo tile, title, subtitle),
+  with the step indicator bottom-left and actions bottom-right. Light
+  mode is the default; a corner toggle switches to dark. All text and
+  control colours meet WCAG AA contrast (see `oobe.css`).
 - **Backend**: a privileged C binary, `kibaos-oobe-backend`, invoked via
   `sudo` with a plain argv array — no shell string, no
   quoting/injection surface, no D-Bus/polkit dependency. GPT
