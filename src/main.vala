@@ -92,7 +92,8 @@ public class KibaOOBE : Adw.Application {
         window = new Adw.ApplicationWindow (this) {
             default_width  = WIN_W,
             default_height = WIN_H,
-            resizable      = false,
+            resizable      = true,   // must be resizable for WMs to honor fullscreen
+            fullscreened   = true,
             deletable      = false,
             title          = in_vm ? "KibaOS Setup"
                              : is_oem_mode ? "Finish Setting Up KibaOS" : "KibaOS Setup"
