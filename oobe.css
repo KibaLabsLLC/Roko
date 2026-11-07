@@ -1,423 +1,269 @@
-/* ═══════════════════════════════════════════════════════════════════════
- * KibaOS OOBE — floating-window design, light mode by default.
- *
- * The installer is a fixed-size, rounded window that floats over the
- * desktop wallpaper (see KibaOOBE.activate / build_window_shell in
- * main.vala). Content is left-aligned: logo tile, title, subtitle, with
- * the step indicator bottom-left and the action buttons bottom-right.
- *
- * Accessibility: every text colour below meets WCAG 2.1 AA (>= 4.5:1)
- * against the surface it sits on, and every control boundary / focus
- * ring meets the 3:1 non-text minimum. Ratios are noted on the tokens.
- *
- * Light surfaces : #ffffff window, #f5f5f7 inset surfaces
- * Light text     : #000000 / #1d1d1f (≥ 16:1), #3a3a3c (11.4:1),
- *                  #505055 (8.0:1)
- * Light accent   : #0062cc (5.8:1 with white text and on white)
- * Dark surfaces  : #2c2c2e window, #3a3a3c inset surfaces
- * Dark text      : #ffffff, #e5e5ea (11.1:1), #c7c7cc (8.3:1)
- * Dark accent    : #6cb0ff (6.2:1 on #2c2c2e, 8.8:1 under #0a0a0c text)
- * ═══════════════════════════════════════════════════════════════════════ */
+/* KibaOS installer — light-only theme.
+ * Palette comes from the mascot: deep navy ink + periwinkle blue accent.
+ * Shapes are squircle-ish (large radii) to match the desktop panels. */
 
-/* ── Window ────────────────────────────────────────────────────────────── */
+@define-color oobe_accent        #3b5bdb;
+@define-color oobe_accent_hover  #3451c7;
+@define-color oobe_accent_press  #2d46b0;
+@define-color oobe_ink           #14183a;
+@define-color oobe_muted         #5b6385;
+@define-color oobe_line          #e6eaf8;
+@define-color oobe_tint          #eef2ff;
+
+* { font-family: "Nunito", "Inter", "Cantarell", system-ui, sans-serif; }
+
+/* ── Window + card ─────────────────────────────────────────────────── */
 window.kibaos-oobe-window {
-    background: #ffffff;
-    color:      #1d1d1f;
-}
-window.dark.kibaos-oobe-window {
-    background: #2c2c2e;
-    color:      #ffffff;
+    background-image: linear-gradient(135deg, #dfe6ff 0%, #f1f4ff 48%, #ffffff 100%);
+    color: @oobe_ink;
 }
 
 .oobe-window {
-    background: #ffffff;
-    color:      #1d1d1f;
-}
-window.dark .oobe-window {
-    background: #2c2c2e;
-    color:      #ffffff;
-}
-
-/* ── Title strip (drag handle, brand, corner controls) ─────────────────── */
-.oobe-titlebar {
-    padding: 18px 24px 0 28px;
+    background-color: #ffffff;
+    border-radius: 30px;
+    border: 1px solid rgba(59, 91, 219, 0.10);
+    box-shadow: 0 34px 90px rgba(33, 48, 120, 0.20),
+                0 8px 24px rgba(33, 48, 120, 0.10);
 }
 
+/* ── Sidebar ───────────────────────────────────────────────────────── */
+.oobe-sidebar {
+    padding: 34px 22px 26px 26px;
+    background-image: linear-gradient(180deg, #f4f6ff 0%, #e8edff 100%);
+    border-right: 1px solid rgba(59, 91, 219, 0.10);
+}
 .oobe-brand {
-    font-size:      15px;
-    font-weight:    700;
-    letter-spacing: -0.2px;
-    color:          #1d1d1f;
+    font-size: 21px;
+    font-weight: 800;
+    color: @oobe_ink;
+    letter-spacing: -0.01em;
 }
-window.dark .oobe-brand { color: #ffffff; }
+.oobe-sidebar-foot {
+    font-size: 12px;
+    font-weight: 700;
+    color: rgba(20, 24, 58, 0.45);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
 
-.oobe-corner-button {
-    background:    #ffffff;
-    color:         #1d1d1f;
-    border:        1px solid #8a8a8e;               /* 3.4:1 */
+/* Mascot tile: squircle clip + soft lift */
+.oobe-mascot {
+    background-color: #ffffff;
+    border-radius: 32%;
+    box-shadow: 0 6px 18px rgba(33, 48, 120, 0.18);
+}
+.oobe-mascot-fallback {
+    font-weight: 800;
+    font-size: 28px;
+    color: @oobe_accent;
+}
+
+/* Step tracker */
+.oobe-step-row {
+    padding: 9px 12px;
+    border-radius: 14px;
+    transition: background-color 180ms ease;
+}
+.oobe-step-name {
+    font-size: 15px;
+    font-weight: 600;
+    color: rgba(20, 24, 58, 0.55);
+}
+.oobe-step-badge {
+    min-width: 26px;
+    min-height: 26px;
     border-radius: 999px;
-    min-width:     36px;
-    min-height:    32px;
-    padding:       4px 14px;
-    font-size:     13px;
-    font-weight:   600;
-    transition:
-        background-color 140ms cubic-bezier(0.22, 1, 0.36, 1),
-        border-color     140ms cubic-bezier(0.22, 1, 0.36, 1);
+    font-size: 12px;
+    font-weight: 800;
+    color: @oobe_accent;
+    background-color: rgba(59, 91, 219, 0.10);
+    border: 1.5px solid rgba(59, 91, 219, 0.25);
 }
-.oobe-corner-button:hover  { background: #f0f0f5; border-color: #636366; }
-.oobe-corner-button:active { background: #e5e5ea; }
-window.dark .oobe-corner-button {
-    background:   #3a3a3c;
-    color:        #ffffff;
-    border-color: #98989d;                           /* 4.9:1 */
+.oobe-step-active { background-color: rgba(59, 91, 219, 0.11); }
+.oobe-step-active .oobe-step-name { color: @oobe_ink; font-weight: 800; }
+.oobe-step-active .oobe-step-badge {
+    color: #ffffff;
+    background-color: @oobe_accent;
+    border-color: @oobe_accent;
+    box-shadow: 0 3px 8px rgba(59, 91, 219, 0.35);
 }
-window.dark .oobe-corner-button:hover  { background: #48484a; border-color: #c7c7cc; }
-window.dark .oobe-corner-button:active { background: #636366; }
-
-/* ── Content / footer ──────────────────────────────────────────────────── */
-.oobe-inner  { padding: 20px 40px 12px 40px; }
-.oobe-footer { padding: 14px 32px 24px 40px; }
-.oobe-nav-row { margin: 0; }
-
-/* ── Logo tile (welcome page) ──────────────────────────────────────────── */
-.oobe-logo-tile {
-    background:    #f5f5f7;
-    border:        1px solid #d1d1d6;
-    border-radius: 16px;
-    padding:       12px;
-    animation:     fade-up 380ms cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-window.dark .oobe-logo-tile {
-    background:   #3a3a3c;
-    border-color: #636366;
+.oobe-step-done .oobe-step-name { color: rgba(20, 24, 58, 0.75); }
+.oobe-step-done .oobe-step-badge {
+    color: #ffffff;
+    background-color: #5f7ce8;
+    border-color: #5f7ce8;
 }
 
-/* ── Step indicator ────────────────────────────────────────────────────── */
-.oobe-step-dot {
-    min-width:     8px;
-    min-height:    8px;
-    border-radius: 999px;
-    background:    #8e8e93;                         /* 3.3:1 */
-    transition:    all 300ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-.oobe-step-dot-active {
-    min-width:  24px;
-    background: #0062cc;
-}
-window.dark .oobe-step-dot        { background: #98989d; }
-window.dark .oobe-step-dot-active { background: #6cb0ff; }
+/* ── Main column ───────────────────────────────────────────────────── */
+.oobe-main  { background-color: #ffffff; }
+.oobe-inner { padding: 42px 46px 14px 46px; }
 
-.oobe-step-label {
-    font-size:      13px;
-    font-weight:    600;
-    color:          #505055;                        /* 8.0:1 */
-    letter-spacing: 0.2px;
+.oobe-eyebrow {
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.16em;
+    color: @oobe_accent;
 }
-window.dark .oobe-step-label { color: #c7c7cc; }    /* 8.3:1 */
-
-/* ── Typography ────────────────────────────────────────────────────────── */
 .oobe-welcome-greeting {
-    font-size:      32px;
-    font-weight:    700;
-    color:          #000000;
-    letter-spacing: -0.5px;
-    line-height:    1.2;
-    margin-top:     8px;
-    animation:      fade-up 460ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    font-size: 40px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    color: @oobe_ink;
 }
-window.dark .oobe-welcome-greeting { color: #ffffff; }
-
 .oobe-title {
-    font-size:      28px;
-    font-weight:    700;
-    color:          #000000;
-    letter-spacing: -0.4px;
-    line-height:    1.25;
-    margin-bottom:  6px;
-    animation:      fade-up 380ms cubic-bezier(0.22, 1, 0.36, 1) 60ms both;
+    font-size: 29px;
+    font-weight: 800;
+    letter-spacing: -0.015em;
+    color: @oobe_ink;
 }
 .oobe-subtitle {
-    font-size:   15px;
-    font-weight: 400;
-    color:       #3a3a3c;                           /* 11.4:1 */
-    line-height: 1.5;
-    animation:   fade-up 380ms cubic-bezier(0.22, 1, 0.36, 1) 100ms both;
+    font-size: 15px;
+    color: @oobe_muted;
+}
+.oobe-hint  { font-size: 13px; color: #7a82a8; }
+.oobe-error { font-size: 14px; font-weight: 700; color: #d92d4b; }
+
+/* ── Footer ────────────────────────────────────────────────────────── */
+.oobe-footer {
+    padding: 16px 30px 24px 46px;
+    border-top: 1px solid @oobe_line;
+}
+.oobe-step-label {
+    font-size: 13px;
+    font-weight: 700;
+    color: #8a91b4;
+}
+
+/* ── Buttons ───────────────────────────────────────────────────────── */
+button.oobe-primary-button,
+button.oobe-secondary-button {
+    border-radius: 15px;
+    padding: 11px 28px;
+    font-size: 15px;
+    font-weight: 800;
+    background-image: none;
+    border: none;
+    transition: background-color 150ms ease, box-shadow 150ms ease;
+}
+button.oobe-primary-button {
+    color: #ffffff;
+    background-color: @oobe_accent;
+    box-shadow: 0 8px 18px rgba(59, 91, 219, 0.30);
+}
+button.oobe-primary-button:hover  { background-color: @oobe_accent_hover; }
+button.oobe-primary-button:active { background-color: @oobe_accent_press; box-shadow: 0 3px 8px rgba(59, 91, 219, 0.30); }
+button.oobe-primary-button:disabled {
+    color: #7c89bf;
+    background-color: #e3e8fb;
+    box-shadow: none;
+    opacity: 1;
+}
+button.oobe-secondary-button {
+    color: #2b3470;
+    background-color: #eef1fb;
+    box-shadow: none;
+}
+button.oobe-secondary-button:hover  { background-color: #e1e7fa; }
+button.oobe-secondary-button:active { background-color: #d5dcf5; }
+button.oobe-primary-button:focus-visible,
+button.oobe-secondary-button:focus-visible {
+    outline: 3px solid rgba(59, 91, 219, 0.45);
+    outline-offset: 2px;
+}
+
+/* ── Lists (Wi-Fi, storage, install mode) ──────────────────────────── */
+list.oobe-list { background: transparent; }
+list.oobe-list > row {
+    margin: 4px 0;
+    border-radius: 16px;
+    background-color: #f6f8ff;
+    border: 1.5px solid transparent;
+    transition: background-color 140ms ease, border-color 140ms ease;
+}
+list.oobe-list > row:hover { background-color: #eef2ff; }
+list.oobe-list > row:selected {
+    background-color: rgba(59, 91, 219, 0.10);
+    border-color: rgba(59, 91, 219, 0.55);
+}
+.oobe-signal-glyph {
+    color: @oobe_accent;
+    font-weight: 800;
+    letter-spacing: 1px;
+    margin-right: 6px;
+}
+.oobe-entry { border-radius: 12px; }
+
+/* ── Grouped form rows (language, account) ─────────────────────────── */
+.oobe-prefs-group list.boxed-list,
+.oobe-prefs-group .boxed-list {
+    border-radius: 18px;
+    background-color: #f6f8ff;
+    border: 1px solid @oobe_line;
+    box-shadow: none;
+}
+.oobe-prefs-group row { background-color: transparent; }
+.oobe-prefs-group row.error { background-color: rgba(217, 45, 75, 0.07); }
+
+/* ── Consent disclosure ────────────────────────────────────────────── */
+.oobe-consent-scroller {
+    border: 1px solid @oobe_line;
+    border-radius: 18px;
+    background-color: #f9faff;
 }
 .oobe-consent-text {
-    font-size:   14px;
-    font-weight: 400;
-    color:       #1d1d1f;
-    line-height: 1.55;
-}
-@keyframes fade-up {
-    from { opacity: 0; transform: translateY(8px); }
-    to   { opacity: 1; transform: translateY(0);   }
-}
-window.dark .oobe-title        { color: #ffffff; }
-window.dark .oobe-subtitle     { color: #e5e5ea; }
-window.dark .oobe-consent-text { color: #f2f2f7; }
-
-.oobe-error {
-    font-size:   14px;
-    font-weight: 600;
-    color:       #c4170c;                           /* 6.0:1 */
-    line-height: 1.5;
-    animation:   fade-up 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-window.dark .oobe-error { color: #ff6961; }         /* 4.9:1 */
-
-/* ── Wi-Fi canvas ──────────────────────────────────────────────────────── */
-.oobe-wifi-canvas {
-    animation: scale-in 500ms cubic-bezier(0.34, 1.56, 0.64, 1) 80ms both;
-}
-@keyframes scale-in {
-    from { opacity: 0; transform: scale(0.6); }
-    to   { opacity: 1; transform: scale(1);   }
+    font-size: 13px;
+    color: #333a63;
+    padding: 14px 16px;
 }
 
-/* ── List / pickers ────────────────────────────────────────────────────── */
-.oobe-list { background: transparent; }
-
-.oobe-signal-glyph {
-    font-family: monospace;
-    font-size:   15px;
-    font-weight: 700;
-    color:       #0062cc;
-    min-width:   34px;
-}
-window.dark .oobe-signal-glyph { color: #6cb0ff; }
-
-.oobe-list row,
-listview > row {
-    background:    #ffffff;
-    border:        1px solid #8a8a8e;               /* 3.4:1 */
-    border-radius: 12px;
-    margin:        5px 0;
-    padding:       12px 16px;
-    color:         #000000;
-    transition:
-        background-color 180ms cubic-bezier(0.22, 1, 0.36, 1),
-        border-color     180ms cubic-bezier(0.22, 1, 0.36, 1),
-        box-shadow       180ms cubic-bezier(0.22, 1, 0.36, 1);
-    animation: fade-up 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-.oobe-list row label { color: #000000; opacity: 1; }
-.oobe-list row:hover {
-    background:   #eef4ff;
-    border-color: #0062cc;
-}
-.oobe-list row:selected {
-    background:   #dbe9ff;
-    border-color: #0062cc;
-    box-shadow:   0 0 0 2px #0062cc;
-}
-.oobe-list row:selected label { color: #000000; }
-.oobe-list row:focus-visible {
-    outline:        3px solid #0062cc;
-    outline-offset: 2px;
-}
-window.dark .oobe-list row,
-window.dark listview > row {
-    background:   #3a3a3c;
-    border-color: #98989d;
-    color:        #ffffff;
-}
-window.dark .oobe-list row label    { color: #ffffff; }
-window.dark .oobe-list row:hover    { background: #0a3a73; border-color: #6cb0ff; }
-window.dark .oobe-list row:selected {
-    background:   #0a3a73;
-    border-color: #6cb0ff;
-    box-shadow:   0 0 0 2px #6cb0ff;
-}
-window.dark .oobe-list row:selected label { color: #ffffff; }
-window.dark .oobe-list row:focus-visible  { outline-color: #6cb0ff; }
-
-/* ── Preferences group (account page) ─────────────────────────────────── */
-.oobe-prefs-group {
-    border-radius: 12px;
-    border:        1px solid #8a8a8e;
-    background:    #ffffff;
-}
-window.dark .oobe-prefs-group {
-    background:   #3a3a3c;
-    border-color: #98989d;
-}
-
-/* ── Summary box (confirm page) ────────────────────────────────────────── */
+/* ── Review summary ────────────────────────────────────────────────── */
 .oobe-summary-box {
-    background:    #ffffff;
-    border:        1px solid #8a8a8e;
+    border: 1px solid @oobe_line;
+    border-radius: 18px;
+    background-color: #f9faff;
+}
+.oobe-summary-row  { padding: 13px 20px; }
+.oobe-summary-key  { font-size: 14px; color: @oobe_muted; }
+.oobe-summary-val  { font-size: 14px; font-weight: 800; color: @oobe_ink; }
+.oobe-summary-sep  { background-color: @oobe_line; min-height: 1px; }
+
+.oobe-callout {
+    padding: 12px 16px;
     border-radius: 14px;
-    margin-top:    8px;
+    background-color: #fff4e5;
+    border: 1px solid #ffd8a8;
+    color: #8a4b08;
+    font-weight: 700;
 }
-.oobe-summary-row { padding: 12px 18px; }
-.oobe-summary-sep { margin: 0 18px; opacity: 0.35; }
-.oobe-summary-key {
-    font-size:   14px;
-    font-weight: 600;
-    color:       #3a3a3c;                           /* 11.4:1 */
-}
-.oobe-summary-val {
-    font-size:   14px;
-    font-weight: 600;
-    color:       #000000;
-}
-window.dark .oobe-summary-box { background: #3a3a3c; border-color: #98989d; }
-window.dark .oobe-summary-key { color: #c7c7cc; }
-window.dark .oobe-summary-val { color: #ffffff; }
 
-/* ── Done check icon ───────────────────────────────────────────────────── */
+/* ── Progress ──────────────────────────────────────────────────────── */
+progressbar.oobe-progress trough {
+    min-height: 14px;
+    border-radius: 999px;
+    background-color: #e6ebfb;
+}
+progressbar.oobe-progress progress {
+    min-height: 14px;
+    border-radius: 999px;
+    background-image: linear-gradient(90deg, #6f8cf5, #3b5bdb);
+}
+progressbar.oobe-progress text {
+    font-size: 12px;
+    font-weight: 800;
+    color: @oobe_accent;
+}
+progressbar.oobe-progress-error progress { background-image: linear-gradient(90deg, #f08a9a, #d92d4b); }
+
+/* ── Done ──────────────────────────────────────────────────────────── */
 .oobe-done-check {
-    color:         #1b7f3a;                         /* 5.1:1 */
-    font-size:     52px;
-    font-weight:   800;
-    margin-bottom: -6px;
-    animation:     pop-in 500ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
-}
-window.dark .oobe-done-check { color: #30d158; }
-@keyframes pop-in {
-    from { opacity: 0; transform: scale(0.4); }
-    to   { opacity: 1; transform: scale(1);   }
-}
-
-/* ── Buttons ───────────────────────────────────────────────────────────── */
-.oobe-primary-button {
-    background:    #0062cc;                          /* 5.8:1 with white */
-    color:         #ffffff;
-    border:        1px solid #0062cc;
+    min-width: 60px;
+    min-height: 60px;
     border-radius: 999px;
-    padding:       10px 28px;
-    font-weight:   600;
-    font-size:     15px;
-    min-width:     120px;
-    box-shadow:    0 2px 6px rgba(0, 98, 204, 0.25);
-    transition:
-        background-color 140ms cubic-bezier(0.22, 1, 0.36, 1),
-        box-shadow       140ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-.oobe-primary-button:hover  { background: #0052a8; border-color: #0052a8; }
-.oobe-primary-button:active { background: #004489; border-color: #004489; box-shadow: none; }
-.oobe-primary-button:focus-visible {
-    outline:        3px solid #000000;
-    outline-offset: 2px;
-}
-.oobe-primary-button:disabled {
-    background:   #e5e5ea;
-    border-color: #8a8a8e;
-    color:        #505055;                           /* 6.6:1 on #e5e5ea */
-    box-shadow:   none;
-}
-window.dark .oobe-primary-button {
-    background:   #6cb0ff;
-    border-color: #6cb0ff;
-    color:        #0a0a0c;                           /* 8.8:1 */
-    box-shadow:   none;
-}
-window.dark .oobe-primary-button:hover  { background: #8cc2ff; border-color: #8cc2ff; }
-window.dark .oobe-primary-button:active { background: #4f9cf0; border-color: #4f9cf0; }
-window.dark .oobe-primary-button:focus-visible { outline-color: #ffffff; }
-window.dark .oobe-primary-button:disabled {
-    background:   #48484a;
-    border-color: #98989d;
-    color:        #e5e5ea;
+    font-size: 32px;
+    font-weight: 800;
+    color: #ffffff;
+    background-image: linear-gradient(135deg, #6f8cf5, #3b5bdb);
+    box-shadow: 0 10px 24px rgba(59, 91, 219, 0.35);
 }
 
-.oobe-secondary-button {
-    background:    #ffffff;
-    color:         #000000;
-    border:        1px solid #8a8a8e;
-    border-radius: 999px;
-    padding:       10px 24px;
-    font-size:     15px;
-    font-weight:   600;
-    min-width:     100px;
-    transition:
-        background-color 140ms cubic-bezier(0.22, 1, 0.36, 1),
-        border-color     140ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-.oobe-secondary-button:hover  { background: #f0f0f5; border-color: #636366; }
-.oobe-secondary-button:active { background: #e5e5ea; }
-.oobe-secondary-button:focus-visible {
-    outline:        3px solid #0062cc;
-    outline-offset: 2px;
-}
-window.dark .oobe-secondary-button {
-    background:   #3a3a3c;
-    color:        #ffffff;
-    border-color: #98989d;
-}
-window.dark .oobe-secondary-button:hover  { background: #48484a; border-color: #c7c7cc; }
-window.dark .oobe-secondary-button:active { background: #636366; }
-window.dark .oobe-secondary-button:focus-visible { outline-color: #6cb0ff; }
-
-/* ── Progress bar ──────────────────────────────────────────────────────── */
-.oobe-progress { min-height: 8px; border-radius: 999px; }
-.oobe-progress trough {
-    background:    #d1d1d6;
-    border:        1px solid #8a8a8e;
-    border-radius: 999px;
-    min-height:    8px;
-}
-.oobe-progress progress {
-    background:    #0062cc;
-    border-radius: 999px;
-    transition:    all 450ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-window.dark .oobe-progress trough   { background: #48484a; border-color: #98989d; }
-window.dark .oobe-progress progress { background: #6cb0ff; }
-
-/* ── Form entries ──────────────────────────────────────────────────────── */
-entry, row.entry, .oobe-prefs-group entry {
-    background:    #ffffff;
-    border:        1px solid #8a8a8e;
-    border-radius: 10px;
-    color:         #000000;
-    padding:       8px 12px;
-    transition:
-        border-color     160ms cubic-bezier(0.22, 1, 0.36, 1),
-        background-color 160ms cubic-bezier(0.22, 1, 0.36, 1),
-        box-shadow       160ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-entry:focus-within, row.entry:focus-within {
-    border-color: #0062cc;
-    background:   #ffffff;
-    box-shadow:   0 0 0 3px rgba(0, 98, 204, 0.45);
-}
-/* Adwaita dims placeholder/title text with opacity; keep it ≥ 4.5:1 */
-entry text > placeholder,
-entry placeholder       { color: #5a5a5f; opacity: 1; }     /* 6.6:1 */
-row.entry label         { color: #3a3a3c; opacity: 1; }
-window.dark entry, window.dark row.entry, window.dark .oobe-prefs-group entry {
-    background:   #3a3a3c;
-    border-color: #98989d;
-    color:        #ffffff;
-}
-window.dark entry:focus-within, window.dark row.entry:focus-within {
-    border-color: #6cb0ff;
-    box-shadow:   0 0 0 3px rgba(108, 176, 255, 0.55);
-}
-window.dark entry text > placeholder,
-window.dark entry placeholder { color: #c7c7cc; opacity: 1; }
-window.dark row.entry label   { color: #e5e5ea; opacity: 1; }
-
-/* ── ComboRow / ActionRow (Adwaita overrides) ──────────────────────────── */
-row.combo, row.action {
-    border-radius: 10px;
-    background:    #ffffff;
-    color:         #000000;
-    border:        1px solid #8a8a8e;
-    margin:        4px 0;
-}
-row.combo label, row.action label { color: #000000; opacity: 1; }
-row.combo .subtitle, row.action .subtitle {
-    color:   #3a3a3c;
-    opacity: 1;                                      /* undo Adwaita dimming */
-}
-window.dark row.combo, window.dark row.action {
-    background:   #3a3a3c;
-    border-color: #98989d;
-    color:        #ffffff;
-}
-window.dark row.combo label, window.dark row.action label { color: #ffffff; }
-window.dark row.combo .subtitle, window.dark row.action .subtitle { color: #e5e5ea; }
+.oobe-wifi-canvas { background: transparent; }
