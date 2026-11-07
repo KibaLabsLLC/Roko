@@ -471,12 +471,7 @@ int kiba_install_finalize(const char *target_root, const char *disk_path,
     }
 
     {
-        /* Only the archiso/live-medium-only tooling gets stripped here;
-         * nothing bootloader-related is pulled from the target by this
-         * step (grub/os-prober were dropped from packages.x86_64 /
-         * packages.aarch64 entirely -- systemd-boot ships as part of
-         * the systemd package, which `base` already depends on, so
-         * there's nothing extra to install or remove for it). */
+        /* Only the archiso/live-medium-only tooling gets stripped here. */
         char *argv[] = {
             (char *)"pacman", (char *)"-Rns", (char *)"--noconfirm",
             (char *)"archiso", (char *)"mkinitcpio-archiso", (char *)"squashfs-tools",
@@ -485,17 +480,46 @@ int kiba_install_finalize(const char *target_root, const char *disk_path,
         chroot_run(target_root, argv); /* best-effort, same as old backend */
     }
 
+    /* GRUB and everything grub-install/grub-mkconfig shell out to are
+     * installed straight into target_root with pacman BEFORE the
+     * bootloader step below -- they are deliberately not baked into the
+     * ISO. Needs a live network connection (same as the codec step
+     * further down), but unlike that one this is FATAL on failure: with
+     * no bootloader the installed system can't boot at all.
+     *   grub        -- grub-install, grub-mkconfig, the EFI modules
+     *   efibootmgr  -- grub-install uses it to write the NVRAM boot entry
+     *   dosfstools  -- the ESP is vfat; grub-install probes it
+     *   mtools      -- grub-mkrescue/grub-install helper, cheap to have
+     *   os-prober   -- finds other OSes for dualboot menu entries */
+    if (cb) cb(83, "Installing the boot loader...", user_data);
+    {
+        char *argv[] = {
+            (char *)"pacman", (char *)"-S", (char *)"--noconfirm", (char *)"--needed",
+            (char *)"grub", (char *)"efibootmgr", (char *)"dosfstools",
+            (char *)"mtools", (char *)"os-prober", NULL
+        };
+        if (chroot_run(target_root, argv) != 0) {
+            /* The target's sync databases may be missing/stale (the image
+             * was captured from a squashfs, not a fresh pacstrap). Refresh
+             * once and retry before giving up. */
+            char *argv_sy[] = {
+                (char *)"pacman", (char *)"-Sy", (char *)"--noconfirm", (char *)"--needed",
+                (char *)"grub", (char *)"efibootmgr", (char *)"dosfstools",
+                (char *)"mtools", (char *)"os-prober", NULL
+            };
+            if (chroot_run(target_root, argv_sy) != 0) {
+                snprintf(g_finish_err, sizeof(g_finish_err),
+                         "couldn't install GRUB with pacman -- check that this "
+                         "computer is connected to the internet and try again");
+                return -1;
+            }
+        }
+    }
+
     if (cb) cb(84, "Setting up your computer to start KibaOS...", user_data);
     {
-        /* KibaOS is UEFI-only, which needs /sys/firmware/efi/efivars to
-         * write the NVRAM boot entry. Fail fast with a clear message
-         * instead of letting bootctl die with a cryptic error. This
-         * is a firmware requirement, not a VM restriction -- a VM booted
-         * in UEFI mode passes this check exactly like real hardware
-         * does; it's specifically legacy/BIOS boot mode that trips it,
-         * which happens to be a VM's *default* in a lot of hypervisors
-         * (VirtualBox, QEMU without OVMF, etc.) unless UEFI firmware is
-         * explicitly selected for that VM. */
+        /* GRUB's UEFI install still needs /sys/firmware/efi/efivars to
+         * write the NVRAM entry; fail fast with a clear message. */
         if (access("/sys/firmware/efi", F_OK) != 0) {
             snprintf(g_finish_err, sizeof(g_finish_err),
                      "KibaOS requires UEFI boot, and this system appears to "
@@ -507,119 +531,75 @@ int kiba_install_finalize(const char *target_root, const char *disk_path,
             return -1;
         }
 
-        /* Unlike grub-install, bootctl takes no --target/arch flag --
-         * systemd ships one systemd-boot*.efi per arch and bootctl always
-         * installs the copy matching the binary's own arch, so this one
-         * call works unmodified whether the installer binary is running
-         * on x86_64 or aarch64 (no uname()-based branching needed here
-         * the way grub_target required). `install` writes both the
-         * generic removable-media fallback path (/boot/EFI/BOOT/) and,
-         * via efibootmgr under the hood (already in
-         * packages.x86_64/packages.aarch64), a real NVRAM boot entry --
-         * bootctl labels that entry from /etc/os-release's PRETTY_NAME
-         * (already "KibaOS", set earlier in this build) rather than a
-         * generic "Linux Boot Manager", so no separate manual efibootmgr
-         * call is needed the way grub-install's --bootloader-id used to
-         * require. bootctl also figures out the ESP's disk and partition
-         * number itself from the /boot mountpoint -- unlike the old
-         * hand-rolled efibootmgr approach this replaced, it doesn't need
-         * disk_path/an ESP partition number handed to it at all, so this
-         * works identically whether the ESP is partition 1 (fresh
-         * install) or some other number (dualboot, sharing an existing
-         * ESP). --esp-path=/boot matches where the OOBE partitioner
-         * already mounted the ESP (see the partitioning step earlier in
-         * the install pipeline). */
+        /* Unlike bootctl, grub-install needs the target arch spelled out. */
+        struct utsname un;
+        const char *grub_target = "x86_64-efi";
+        if (uname(&un) == 0 &&
+            (strcmp(un.machine, "aarch64") == 0 || strcmp(un.machine, "arm64") == 0))
+            grub_target = "arm64-efi";
+
+        char target_arg[64];
+        snprintf(target_arg, sizeof(target_arg), "--target=%s", grub_target);
+
+        /* Normal install: copies GRUB to /boot/EFI/KibaOS and writes the
+         * NVRAM boot entry labeled "KibaOS". --efi-directory=/boot matches
+         * where the OOBE partitioner mounted the ESP. */
         char *argv[] = {
-            (char *)"bootctl", (char *)"--esp-path=/boot", (char *)"install", NULL
+            (char *)"grub-install", target_arg,
+            (char *)"--efi-directory=/boot", (char *)"--boot-directory=/boot",
+            (char *)"--bootloader-id=KibaOS", NULL
         };
         if (chroot_run(target_root, argv) != 0) {
-            snprintf(g_finish_err, sizeof(g_finish_err), "bootctl install failed");
+            snprintf(g_finish_err, sizeof(g_finish_err), "grub-install failed");
             return -1;
         }
+
+        /* Second, --removable install: puts a copy at the fallback path
+         * (/boot/EFI/BOOT/BOOTX64.EFI) for firmware that drops/ignores
+         * NVRAM entries (common on Chromebooks and some VMs).
+         * Best-effort -- the NVRAM install above already succeeded. */
+        char *argv_rm[] = {
+            (char *)"grub-install", target_arg,
+            (char *)"--efi-directory=/boot", (char *)"--boot-directory=/boot",
+            (char *)"--removable", NULL
+        };
+        chroot_run(target_root, argv_rm);
     }
 
     if (cb) cb(86, "Building your boot menu...", user_data);
     {
-        /* loader.conf: systemd-boot's own top-level config. bootctl
-         * install above already wrote a stub one; overwrite it with our
-         * own values rather than editing in place, since we know exactly
-         * what we want and don't need to preserve anything it generated.
-         * timeout 0 means boot straight to KibaOS with no visible menu,
-         * same as GRUB_TIMEOUT=0 used to give us -- except on a dualboot
-         * install, where a longer timeout matters for the same reason it
-         * did under the old rEFInd path: systemd-boot auto-discovers
-         * other EFI bootloaders already on the ESP on its own (Boot
-         * Loader Specification autodetection, no os-prober equivalent
-         * needed), but that discovered menu is only useful if it's
-         * actually visible long enough to pick from. */
-        snprintf(path, sizeof(path), "%s/boot/loader/loader.conf", target_root);
-        char loader_conf[256];
-        snprintf(loader_conf, sizeof(loader_conf),
-                 "default kibaos.conf\n"
-                 "timeout %d\n"
-                 "console-mode max\n"
-                 "editor no\n",
-                 dualboot ? 5 : 0);
-        if (write_file(path, loader_conf) != 0) {
-            snprintf(g_finish_err, sizeof(g_finish_err), "writing loader.conf failed");
-            return -1;
-        }
-
-        /* kibaos.conf: the actual boot entry (Boot Loader Specification
-         * Type #1 -- a plain text file, not a UKI). bootctl install
-         * already created /boot/loader/entries/ for us. Unlike GRUB's
-         * grub-mkconfig, this file never needs regenerating on a kernel
-         * update: vmlinuz-linux/initramfs-linux.img are the same fixed
-         * names on every boot (the copy step earlier in kiba_install()
-         * normalizes both x86_64's "linux" and ALARM's "linux-aarch64"
-         * packages down to those names), and the `linux` package's own
-         * pacman hooks keep initramfs-linux.img refreshed in place on
-         * future kernel updates -- so this gets written once, here, and
-         * never touched again. root=UUID=... is written directly from
-         * root_uuid (resolved by the caller from the freshly-formatted
-         * filesystem) rather than relying on any auto-generation, the
-         * same reasoning the old rEFInd path used to avoid picking up
-         * kernel parameters from the live/chroot environment instead of
-         * the target system. */
-        snprintf(path, sizeof(path), "%s/boot/loader/entries", target_root);
-        mkdir(path, 0755); /* best-effort, bootctl install already made this */
-
-        snprintf(path, sizeof(path), "%s/boot/loader/entries/kibaos.conf", target_root);
-        char entry[1024];
-        /* eMMC/SD (mmcblk*) controllers -- common on Chromebooks, including
-         * ones that also carry a microSD slot -- have a well-documented
-         * class of Command Queue Engine (CQE) bugs in the kernel's sdhci
-         * driver: under the sustained heavy writes an OS install does
-         * (unsquashfs extraction is the biggest one), the eMMC can throw
-         * I/O errors or corrupt data outright, which is a very different
-         * failure from anything in this installer -- the files just never
-         * made it onto disk correctly, so whatever's missing/truncated in
-         * target_root fails silently once arch-chroot tries to exec it
-         * later. sdhci.debug_quirks=0x20000 disables the CQE and has been
-         * the documented workaround for exactly this on other Chromebook
-         * Linux installs; carrying it into the INSTALLED system's own boot
-         * entry (not just the live/installer session) keeps it fixed after
-         * first boot too, same as other install guides have had to do by
-         * hand. Only added when the target disk is actually mmcblk* --
-         * harmless to skip on NVMe/SATA/virtio disks that were never
-         * running through this driver in the first place. */
+        /* /etc/default/grub: written in full (we know exactly what we want).
+         * The cmdline carries over everything the old kibaos.conf entry had.
+         * grub-mkconfig itself runs later, after mkinitcpio, so the
+         * initramfs exists when the menu is generated. */
         bool is_mmc_storage = disk_path != NULL && strstr(disk_path, "mmcblk") != NULL;
-        snprintf(entry, sizeof(entry),
-                 "title KibaOS\n"
-                 "linux /vmlinuz-linux\n"
-                 "initrd /initramfs-linux.img\n"
-                 "options root=UUID=%s rw quiet splash loglevel=3 "
+
+        char grub_defaults[2048];
+        snprintf(grub_defaults, sizeof(grub_defaults),
+                 "GRUB_DEFAULT=0\n"
+                 "GRUB_TIMEOUT=%d\n"
+                 "GRUB_TIMEOUT_STYLE=%s\n"
+                 "GRUB_DISTRIBUTOR=\"KibaOS\"\n"
+                 "GRUB_CMDLINE_LINUX_DEFAULT=\"quiet splash loglevel=3 "
                  "rd.udev.log_level=3 vt.global_cursor_default=0 "
                  "plymouth.use-simpledrm=1 "
-                 "lsm=landlock,lockdown,yama,integrity,apparmor,bpf%s\n",
-                 root_uuid, is_mmc_storage ? " sdhci.debug_quirks=0x20000" : "");
-        if (write_file(path, entry) != 0) {
-            snprintf(g_finish_err, sizeof(g_finish_err), "writing boot entry failed");
+                 "lsm=landlock,lockdown,yama,integrity,apparmor,bpf%s\"\n"
+                 "GRUB_CMDLINE_LINUX=\"\"\n"
+                 "GRUB_DISABLE_RECOVERY=true\n"
+                 "GRUB_DISABLE_OS_PROBER=%s\n",
+                 dualboot ? 5 : 0,
+                 dualboot ? "menu" : "hidden",
+                 is_mmc_storage ? " sdhci.debug_quirks=0x20000" : "",
+                 dualboot ? "false" : "true");
+
+        snprintf(path, sizeof(path), "%s/etc/default/grub", target_root);
+        if (write_file(path, grub_defaults) != 0) {
+            snprintf(g_finish_err, sizeof(g_finish_err), "writing /etc/default/grub failed");
             return -1;
         }
     }
 
-    (void)root_partno; /* no longer needed -- bootctl resolves the ESP's partition number the same way */
+    (void)root_partno; /* no longer needed -- grub-install resolves the ESP's disk/partition from the /boot mountpoint */
 
     if (cb) cb(88, "Turning on background features...", user_data);
     {
@@ -788,6 +768,17 @@ int kiba_install_finalize(const char *target_root, const char *disk_path,
         };
         if (chroot_run(target_root, argv) != 0) {
             snprintf(g_finish_err, sizeof(g_finish_err), "mkinitcpio failed");
+            return -1;
+        }
+    }
+
+    if (cb) cb(96, "Building your boot menu...", user_data);
+    {
+        char *argv[] = {
+            (char *)"grub-mkconfig", (char *)"-o", (char *)"/boot/grub/grub.cfg", NULL
+        };
+        if (chroot_run(target_root, argv) != 0) {
+            snprintf(g_finish_err, sizeof(g_finish_err), "grub-mkconfig failed");
             return -1;
         }
     }
