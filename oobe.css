@@ -10,10 +10,64 @@
 @define-color oobe_line          #e6eaf8;
 @define-color oobe_tint          #eef2ff;
 
+/* ── Pin libadwaita's palette to its LIGHT values ─────────────────────
+ * Anything this file doesn't paint explicitly (entries, rows, popovers,
+ * dialogs, header bars, cards, sidebars) takes its colors from these names,
+ * so they stay light even if a dark scheme ever leaks in.
+ * libadwaita 1.6+ reads the CSS variables; older versions read @define-color.
+ * Both are declared so either works. */
+:root {
+    --window-bg-color: #fafafb;
+    --window-fg-color: #14183a;
+    --view-bg-color: #ffffff;
+    --view-fg-color: #14183a;
+    --headerbar-bg-color: #ffffff;
+    --headerbar-fg-color: #14183a;
+    --headerbar-border-color: rgb(0 0 6 / 80%);
+    --headerbar-backdrop-color: #fafafb;
+    --headerbar-shade-color: rgb(0 0 6 / 7%);
+    --card-bg-color: #ffffff;
+    --card-fg-color: #14183a;
+    --card-shade-color: rgb(0 0 6 / 7%);
+    --popover-bg-color: #ffffff;
+    --popover-fg-color: #14183a;
+    --dialog-bg-color: #fafafb;
+    --dialog-fg-color: #14183a;
+    --sidebar-bg-color: #ebebed;
+    --sidebar-fg-color: #14183a;
+    --sidebar-backdrop-color: #f2f2f4;
+    --sidebar-shade-color: rgb(0 0 6 / 7%);
+    --shade-color: rgb(0 0 6 / 7%);
+    --scrollbar-outline-color: #ffffff;
+}
+@define-color window_bg_color #fafafb;
+@define-color window_fg_color #14183a;
+@define-color view_bg_color #ffffff;
+@define-color view_fg_color #14183a;
+@define-color headerbar_bg_color #ffffff;
+@define-color headerbar_fg_color #14183a;
+@define-color headerbar_border_color rgba(0, 0, 6, 0.8);
+@define-color headerbar_backdrop_color #fafafb;
+@define-color headerbar_shade_color rgba(0, 0, 6, 0.07);
+@define-color card_bg_color #ffffff;
+@define-color card_fg_color #14183a;
+@define-color card_shade_color rgba(0, 0, 6, 0.07);
+@define-color popover_bg_color #ffffff;
+@define-color popover_fg_color #14183a;
+@define-color dialog_bg_color #fafafb;
+@define-color dialog_fg_color #14183a;
+@define-color sidebar_bg_color #ebebed;
+@define-color sidebar_fg_color #14183a;
+@define-color sidebar_backdrop_color #f2f2f4;
+@define-color sidebar_shade_color rgba(0, 0, 6, 0.07);
+@define-color shade_color rgba(0, 0, 6, 0.07);
+@define-color scrollbar_outline_color #ffffff;
+
 * { font-family: "Nunito", "Inter", "Cantarell", system-ui, sans-serif; }
 
 /* ── Window + card ─────────────────────────────────────────────────── */
 window.kibaos-oobe-window {
+    background-color: #f1f4ff;
     background-image: linear-gradient(135deg, #dfe6ff 0%, #f1f4ff 48%, #ffffff 100%);
     color: @oobe_ink;
 }
