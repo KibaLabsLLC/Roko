@@ -89,12 +89,6 @@ public class KibaOOBE : Adw.Application {
         var sm = Adw.StyleManager.get_default ();
         sm.color_scheme = Adw.ColorScheme.FORCE_LIGHT;
 
-        // Belt and braces: also tell GTK itself not to prefer dark, and ignore
-        // any dark theme name that leaks in from the session / settings.ini.
-        var gs = Gtk.Settings.get_default ();
-        if (gs != null) {
-            gs.gtk_application_prefer_dark_theme = false;
-        }
     }
 
     protected override void startup () {
@@ -132,7 +126,7 @@ public class KibaOOBE : Adw.Application {
     private void load_css () {
         var p = new Gtk.CssProvider ();
         p.parsing_error.connect ((section, err) => {
-            warning ("oobe.css: %s (line %u)", err.message, section.get_start_location ().lines + 1);
+            warning ("oobe.css: %s (line %u)", err.message, (uint) (section.get_start_location ().lines + 1));
         });
         string[] candidate_paths = {
             "/usr/share/kibaos-oobe/oobe.css",
