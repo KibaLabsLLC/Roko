@@ -21,3 +21,11 @@ executable(
   dependencies: [gtk4_dep, adwaita_dep, m_dep, threads_dep],
   install: true
 )
+
+# Stylesheet. main.vala loads <prefix>/share/kibaos-oobe/oobe.css first; if
+# it isn't there the installer runs completely unstyled. oobe.css lives in
+# the top project dir (one level above this src/ dir).
+install_data(
+  '../oobe.css',
+  install_dir: get_option('datadir') / 'kibaos-oobe'
+)
