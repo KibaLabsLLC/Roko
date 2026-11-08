@@ -131,16 +131,25 @@ public class KibaOOBE : Adw.Application {
 
     private void load_css () {
         var p = new Gtk.CssProvider ();
+        p.parsing_error.connect ((section, err) => {
+            warning ("oobe.css: %s (line %u)", err.message, section.get_start_location ().lines + 1);
+        });
         string[] candidate_paths = {
             "/usr/share/kibaos-oobe/oobe.css",
             "oobe.css",
             "../oobe.css"
         };
+        bool loaded = false;
         foreach (var path in candidate_paths) {
             if (GLib.FileUtils.test (path, GLib.FileTest.EXISTS)) {
                 p.load_from_path (path);
+                message ("Loaded stylesheet: %s", path);
+                loaded = true;
                 break;
             }
+        }
+        if (!loaded) {
+            warning ("oobe.css not found in any search path; UI will be unstyled");
         }
         Gtk.StyleContext.add_provider_for_display (
             Gdk.Display.get_default (), p, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION);
@@ -1598,6 +1607,30 @@ Choosing Don't Share does not affect any KibaOS feature. You can change this cho
         // GTK_THEME (e.g. "Adwaita:dark") overrides libadwaita's stylesheet and
         // makes color_scheme ineffective, so drop it before GTK initialises.
         GLib.Environment.unset_variable ("GTK_THEME");
+
+        // Ignore every system appearance source. These must be set before
+        // libadwaita initialises (i.e. before the application starts).
+        //  - ADW_DISABLE_PORTAL: don't read light/dark, accent or contrast
+        //    from xdg-desktop-portal.
+        //  - GSETTINGS_BACKEND=memory: don't fall back to reading
+        //    org.gnome.desktop.interface from dconf either.
+        //  - ADW_DEBUG_*: pin scheme, contrast and accent to fixed values
+        //    (high contrast can't be disabled through the public API).
+        GLib.Environment.set_variable ("ADW_DISABLE_PORTAL", "1", true);
+        GLib.Environment.set_variable ("GSETTINGS_BACKEND", "memory", true);
+        GLib.Environment.set_variable ("ADW_DEBUG_COLOR_SCHEME", "prefer-light", true);
+        GLib.Environment.set_variable ("ADW_DEBUG_HIGH_CONTRAST", "0", true);
+        GLib.Environment.set_variable ("ADW_DEBUG_ACCENT_COLOR", "blue", true);
+
+        // GTK4 always loads <user config dir>/gtk-4.0/gtk.css (and settings.ini)
+        // on top of the app, and a dark @import there beats everything above.
+        // There is no switch to disable it, so give this process an empty
+        // config dir for GTK to look in.
+        string? empty_cfg = DirUtils.mkdtemp ("/tmp/kiba-oobe-cfg-XXXXXX");
+        if (empty_cfg != null) {
+            GLib.Environment.set_variable ("XDG_CONFIG_HOME", empty_cfg, true);
+        }
+
         return new KibaOOBE ().run (args);
     }
 }
