@@ -59,22 +59,17 @@ ninja -C build install
 cd -
 
 # ── Stylesheet ───────────────────────────────────────────────────────
-# main.vala loads /usr/share/kibaos-oobe/oobe.css FIRST (then ./oobe.css,
-# ../oobe.css), and if none exist the installer runs completely unstyled.
-# Don't trust that src/meson.build installs it -- install it explicitly
-# from the repo copy and verify the installed file is byte-identical, so a
-# stale or missing stylesheet fails the build instead of shipping.
-_css_src="$(find "$(dirname "$0")" -name oobe.css -not -path '*/build/*' | head -n1)"
-if [ -z "${_css_src}" ]; then
-  echo "FATAL: oobe.css not found in the repo -- the installer would be unstyled." >&2
-  exit 1
-fi
-install -Dm644 "${_css_src}" /usr/share/kibaos-oobe/oobe.css
+# src/meson.build installs ../oobe.css to /usr/share/kibaos-oobe/ (the first
+# path main.vala checks); without it the installer runs completely unstyled.
+# Verify it actually landed and is byte-identical to the repo copy, so a
+# missing or stale stylesheet fails the build instead of shipping.
+_css_src="$(dirname "$0")/oobe.css"
+[ -f "${_css_src}" ] || { echo "FATAL: ${_css_src} not found in the top project dir." >&2; exit 1; }
 cmp -s "${_css_src}" /usr/share/kibaos-oobe/oobe.css || {
-  echo "FATAL: installed oobe.css differs from ${_css_src}." >&2
+  echo "FATAL: /usr/share/kibaos-oobe/oobe.css is missing or differs from ${_css_src}." >&2
   exit 1
 }
-echo "=== oobe.css installed from ${_css_src} ==="
+echo "=== oobe.css installed and verified ==="
 
 # ── Privileged backend: libkibadisk + kibaos-oobe-backend
 cd "$(dirname "$0")/src/disk"
