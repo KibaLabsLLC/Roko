@@ -18,6 +18,32 @@ pacman -S --noconfirm --needed gtk4 libadwaita libgee vala meson ninja base-deve
 # gptfdisk -> sgdisk, used by kiba_gpt.c to write the GPT.
 # squashfs-tools -> unsquashfs, used by kiba_install_extract_image().
 
+# ── Fonts ────────────────────────────────────────────────────────────
+# oobe.css's font stack is "Nunito", "Inter", "Cantarell", system-ui. GTK
+# silently falls through that list, so a missing font never errors -- the
+# installer just renders in a different typeface with different widths and
+# wrapping, and no longer matches the design 1:1. Install BOTH so the stack
+# resolves no matter which one is listed first, and fail the build if
+# either one doesn't actually resolve (instead of shipping the wrong look).
+# fontconfig -> fc-cache / fc-match, used for the verification below.
+pacman -S --noconfirm --needed fontconfig ttf-nunito
+# Arch ships Inter as "inter-font"; older repos/mirrors called it "ttf-inter".
+if ! pacman -S --noconfirm --needed inter-font; then
+  pacman -S --noconfirm --needed ttf-inter || {
+    echo "FATAL: could not install Inter (tried inter-font and ttf-inter)." >&2
+    exit 1
+  }
+fi
+fc-cache -f
+for _fam in Nunito Inter; do
+  _got="$(fc-match "${_fam}" family)"
+  case "${_got}" in
+    *"${_fam}"*) echo "=== font OK: ${_fam} -> ${_got} ===" ;;
+    *) echo "FATAL: fontconfig resolves '${_fam}' to '${_got}' -- the font is not installed/visible." >&2
+       exit 1 ;;
+  esac
+done
+
 # ── OOBE frontend (Vala/GTK4/libadwaita): io.kibaos.oobe + io.kibaos.winapps-setup
 cd "$(dirname "$0")/src"
 meson setup build --prefix=/usr || { echo "FATAL: meson setup failed for kibaos-oobe — check vala/gtk4/libadwaita dev package availability." >&2; exit 1; }
@@ -31,6 +57,24 @@ ninja -C build || { echo "FATAL: ninja build failed for kibaos-oobe — check th
 # first place. Needs root (installs under --prefix=/usr).
 ninja -C build install
 cd -
+
+# ── Stylesheet ───────────────────────────────────────────────────────
+# main.vala loads /usr/share/kibaos-oobe/oobe.css FIRST (then ./oobe.css,
+# ../oobe.css), and if none exist the installer runs completely unstyled.
+# Don't trust that src/meson.build installs it -- install it explicitly
+# from the repo copy and verify the installed file is byte-identical, so a
+# stale or missing stylesheet fails the build instead of shipping.
+_css_src="$(find "$(dirname "$0")" -name oobe.css -not -path '*/build/*' | head -n1)"
+if [ -z "${_css_src}" ]; then
+  echo "FATAL: oobe.css not found in the repo -- the installer would be unstyled." >&2
+  exit 1
+fi
+install -Dm644 "${_css_src}" /usr/share/kibaos-oobe/oobe.css
+cmp -s "${_css_src}" /usr/share/kibaos-oobe/oobe.css || {
+  echo "FATAL: installed oobe.css differs from ${_css_src}." >&2
+  exit 1
+}
+echo "=== oobe.css installed from ${_css_src} ==="
 
 # ── Privileged backend: libkibadisk + kibaos-oobe-backend
 cd "$(dirname "$0")/src/disk"
