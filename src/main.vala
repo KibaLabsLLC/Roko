@@ -83,6 +83,31 @@ public class KibaOOBE : Adw.Application {
         Object (application_id: "io.kibaos.oobe", flags: ApplicationFlags.FLAGS_NONE);
     }
 
+    // Light-only, regardless of system theme. Pinned in startup() so it is in
+    // place before any window is created or styled.
+    private void force_light_theme () {
+        var sm = Adw.StyleManager.get_default ();
+        sm.color_scheme = Adw.ColorScheme.FORCE_LIGHT;
+
+        // Belt and braces: also tell GTK itself not to prefer dark, and ignore
+        // any dark theme name that leaks in from the session / settings.ini.
+        var gs = Gtk.Settings.get_default ();
+        if (gs != null) {
+            gs.gtk_application_prefer_dark_theme = false;
+        }
+    }
+
+    protected override void startup () {
+        base.startup ();
+        force_light_theme ();
+        // Re-assert if anything (portal, settings daemon) flips the effective
+        // appearance to dark after startup.
+        Adw.StyleManager.get_default ().notify["dark"].connect (() => {
+            var sm = Adw.StyleManager.get_default ();
+            if (sm.dark) force_light_theme ();
+        });
+    }
+
     protected override void activate () {
         bool in_vm = is_running_in_vm ();
         is_oem_mode = !in_vm && detect_already_on_computer ();
@@ -97,7 +122,6 @@ public class KibaOOBE : Adw.Application {
         };
         window.add_css_class ("kibaos-oobe-window");
         window.close_request.connect (() => { return true; });
-        Adw.StyleManager.get_default ().color_scheme = Adw.ColorScheme.FORCE_LIGHT;
         nav_view = new Adw.NavigationView ();
         window.set_content (nav_view);
         load_css ();
@@ -1571,6 +1595,9 @@ Choosing Don't Share does not affect any KibaOS feature. You can change this cho
     }
 
     public static int main (string[] args) {
+        // GTK_THEME (e.g. "Adwaita:dark") overrides libadwaita's stylesheet and
+        // makes color_scheme ineffective, so drop it before GTK initialises.
+        GLib.Environment.unset_variable ("GTK_THEME");
         return new KibaOOBE ().run (args);
     }
 }
