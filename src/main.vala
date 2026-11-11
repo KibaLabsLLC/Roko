@@ -147,7 +147,48 @@ public class KibaOOBE : Adw.Application {
         }
         Gtk.StyleContext.add_provider_for_display (
             Gdk.Display.get_default (), p, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION);
+
+        // Welcome-screen additions. Kept in code so they ship with the binary;
+        // loaded one priority step above oobe.css so they win on overlap.
+        var extra = new Gtk.CssProvider ();
+        extra.load_from_string (WELCOME_CSS);
+        Gtk.StyleContext.add_provider_for_display (
+            Gdk.Display.get_default (), extra, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 1);
     }
+
+    private const string WELCOME_CSS = """
+        .oobe-welcome-title {
+            font-size: 44px;
+            font-weight: 800;
+            letter-spacing: -0.5px;
+        }
+        .oobe-welcome-lead {
+            font-size: 17px;
+            opacity: 0.68;
+        }
+        button.oobe-pill {
+            border-radius: 999px;
+            min-height: 44px;
+            padding: 0 32px;
+            font-size: 15px;
+            font-weight: 600;
+            transition: all 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+        }
+        button.oobe-pill:hover  { opacity: 0.92; }
+        button.oobe-pill:active { opacity: 0.8; }
+        button.oobe-link {
+            background: none;
+            box-shadow: none;
+            border: none;
+            padding: 6px 4px;
+            font-size: 14px;
+            font-weight: 500;
+            color: @accent_color;
+            transition: opacity 150ms ease;
+        }
+        button.oobe-link:hover  { opacity: 0.7; background: none; }
+        .oobe-welcome-mascot { margin: 0 36px 28px 0; }
+    """;
 
     // ── Embedded mascot ────────────────────────────────────────────────
     // The mascot PNG is compiled into the binary as base64 (see the
@@ -317,7 +358,10 @@ public class KibaOOBE : Adw.Application {
             overflow       = Gtk.Overflow.HIDDEN
         };
         shell.add_css_class ("oobe-window");
-        shell.append (make_sidebar (step));
+        // The welcome screen (step == "") is a single calm, focused screen,
+        // like Apple's Setup Assistant: no step tracker until setup begins.
+        if (step != "") shell.append (make_sidebar (step));
+        else            shell.add_css_class ("oobe-window-welcome");
 
         var main_col = new Gtk.Box (Gtk.Orientation.VERTICAL, 0) { hexpand = true };
         main_col.add_css_class ("oobe-main");
@@ -449,52 +493,70 @@ public class KibaOOBE : Adw.Application {
     // Page 1: Welcome
     // ══════════════════════════════════════════════════════════════════
     private Adw.NavigationPage build_welcome_page () {
-        var hero = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 40) {
-            valign  = Gtk.Align.CENTER,
-            vexpand = true
+        // Text sits left on a roomy canvas; Kiba waves from the
+        // bottom-right corner, out of the way of the call to action.
+        var text_col = new Gtk.Box (Gtk.Orientation.VERTICAL, 12) {
+            halign        = Gtk.Align.START,
+            valign        = Gtk.Align.CENTER,
+            margin_start  = 24,
+            width_request = 420
         };
 
-        var text_col = new Gtk.Box (Gtk.Orientation.VERTICAL, 14) {
-            hexpand = true,
-            valign  = Gtk.Align.CENTER
-        };
-
-        var eyebrow = new Gtk.Label ("WELCOME") { halign = Gtk.Align.START };
-        eyebrow.add_css_class ("oobe-eyebrow");
-        text_col.append (eyebrow);
-
-        var greeting = new Gtk.Label ("Welcome to KibaOS") {
+        var title = new Gtk.Label ("Hello there!") {
             halign = Gtk.Align.START,
-            xalign = 0.0f,
-            wrap   = true
+            xalign = 0.0f
         };
-        greeting.add_css_class ("oobe-welcome-greeting");
-        text_col.append (greeting);
+        title.add_css_class ("oobe-welcome-title");
+        text_col.append (title);
 
-        var subtitle = new Gtk.Label (
-            "Let's get your system set up. This should only take a few minutes.") {
-            halign = Gtk.Align.START,
-            xalign = 0.0f,
-            wrap   = true
+        var lead = new Gtk.Label (
+            "I'm Kiba, and I'll help you get KibaOS ready. " +
+            "It only takes a few minutes, and you can change anything later.") {
+            halign          = Gtk.Align.START,
+            xalign          = 0.0f,
+            wrap            = true,
+            max_width_chars = 40
         };
-        subtitle.add_css_class ("oobe-subtitle");
-        text_col.append (subtitle);
+        lead.add_css_class ("oobe-welcome-lead");
+        text_col.append (lead);
 
-        var try_btn = new Gtk.Button.with_label ("Try KibaOS") {
+        var try_btn = new Gtk.Button.with_label ("Just looking? Try KibaOS first") {
             halign     = Gtk.Align.START,
-            margin_top = 14
+            margin_top = 10
         };
-        try_btn.add_css_class ("oobe-secondary-button");
+        try_btn.add_css_class ("oobe-link");
         try_btn.tooltip_text = "Explore the live desktop without installing anything yet.";
         try_btn.clicked.connect (() => { this.quit (); });
         text_col.append (try_btn);
 
-        hero.append (text_col);
-        hero.append (make_mascot (232));
+        // Overlay: text fills the canvas, mascot is pinned bottom-right.
+        var mascot = make_mascot (176);
+        mascot.halign = Gtk.Align.END;
+        mascot.valign = Gtk.Align.END;
+        mascot.add_css_class ("oobe-welcome-mascot");
+        mascot.can_target = false;   // decorative; never steals clicks or focus
 
-        return make_page ("Welcome", hero, "Get Started", () => {
+        var hero = new Gtk.Overlay () { vexpand = true, hexpand = true };
+        hero.set_child (text_col);
+        hero.add_overlay (mascot);
+
+        var page = make_page ("Welcome", hero, "Let's Go", () => {
             nav_view.push (build_wifi_page ());
         }, true, "");
+
+        // Pill-shaped primary button, Apple-style.
+        if (current_next_btn != null) current_next_btn.add_css_class ("oobe-pill");
+
+        // Gentle fade-in when the screen appears.
+        hero.opacity = 0.0;
+        page.showing.connect (() => {
+            var fade = new Adw.TimedAnimation (
+                hero, 0.0, 1.0, 650,
+                new Adw.PropertyAnimationTarget (hero, "opacity"));
+            fade.easing = Adw.Easing.EASE_OUT_CUBIC;
+            fade.play ();
+        });
+        return page;
     }
 
     // ══════════════════════════════════════════════════════════════════
